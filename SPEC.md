@@ -453,9 +453,11 @@ disagreements; the check lives in `TestDBCMotorola`.
 
 The alternative of mandating a single byte order was considered and rejected. It
 does not relocate the work into importers — it makes the data inexpressible. Of
-the 1,552 Motorola signals that fit an 8-byte CAN frame, only 288 have any
-little-endian bit-slice equivalent, and **not one of those is wider than a single
-byte**: a plain byte-aligned 16-bit Motorola signal has no little-endian
+the 1,552 Motorola signals up to 32 bits wide that fit an 8-byte CAN frame, only
+288 have any little-endian bit-slice equivalent, and **not one of those is wider
+than a single byte**. The width bound is where the counting stops, not where the
+result comes from: lifting it to 64 bits admits 528 further signals and not one
+further equivalent. A plain byte-aligned 16-bit Motorola signal has no little-endian
 expression, because both orders read the same bits and disagree about which byte
 carries the high half. Byte order is not a numbering convention layered over the
 bit model; it is a second thing, and a format for bus data has to carry both.

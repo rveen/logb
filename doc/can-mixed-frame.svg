@@ -1,0 +1,74 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 350" width="760" height="350" role="img" aria-label="A CAN frame mixing Intel and Motorola signals">
+  <style>
+    .bg   { fill: #ffffff; }
+    .fg   { fill: #1f2328; }
+    .mut  { fill: #656d76; }
+    .cell { fill: #ffffff; stroke: #d0d7de; }
+    .grid { stroke: #d8dee4; }
+    .axis { stroke: #8c959f; }
+    .be   { fill: #cf222e; stroke: none; }
+    .be-s { fill: none; stroke: #cf222e; }
+    .bef  { fill: #cf222e; fill-opacity: 0.13; stroke: #cf222e; }
+    .le   { fill: #0969da; stroke: none; }
+    .le-s { fill: none; stroke: #0969da; }
+    .lef  { fill: #0969da; fill-opacity: 0.13; stroke: #0969da; }
+    text  { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .t    { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    @media (prefers-color-scheme: dark) {
+      .bg   { fill: #0d1117; }
+      .fg   { fill: #e6edf3; }
+      .mut  { fill: #8b949e; }
+      .cell { fill: #0d1117; stroke: #30363d; }
+      .grid { stroke: #21262d; }
+      .axis { stroke: #6e7681; }
+      .be   { fill: #ff7b72; stroke: none; }
+      .be-s { fill: none; stroke: #ff7b72; }
+      .bef  { fill: #ff7b72; fill-opacity: 0.15; stroke: #ff7b72; }
+      .le   { fill: #79c0ff; stroke: none; }
+      .le-s { fill: none; stroke: #79c0ff; }
+      .lef  { fill: #79c0ff; fill-opacity: 0.15; stroke: #79c0ff; }
+    }
+  </style>
+  <rect class="bg" width="760" height="350"/>
+  <text class="t fg" x="40" y="30" font-size="15" font-weight="600">One CAN frame, both byte orders</text>
+  <text class="t mut" x="40" y="49" font-size="12">VehicleStatus from internal/example. A real frame mixes Intel and Motorola signals, so byte_order is per field, never per file.</text>
+  <text class="t mut" x="40" y="67" font-size="12">Mandating one order would not move the work into importers &#8212; it would make the data inexpressible.</text>
+  <rect class="cell" x="40" y="120" width="84" height="40"/>
+  <text class="mut" x="82.0" y="112" font-size="10.5" text-anchor="middle">byte 0</text>
+  <rect class="cell" x="124" y="120" width="84" height="40"/>
+  <text class="mut" x="166.0" y="112" font-size="10.5" text-anchor="middle">byte 1</text>
+  <rect class="cell" x="208" y="120" width="84" height="40"/>
+  <text class="mut" x="250.0" y="112" font-size="10.5" text-anchor="middle">byte 2</text>
+  <rect class="cell" x="292" y="120" width="84" height="40"/>
+  <text class="mut" x="334.0" y="112" font-size="10.5" text-anchor="middle">byte 3</text>
+  <rect class="cell" x="376" y="120" width="84" height="40"/>
+  <text class="mut" x="418.0" y="112" font-size="10.5" text-anchor="middle">byte 4</text>
+  <rect class="cell" x="460" y="120" width="84" height="40"/>
+  <text class="mut" x="502.0" y="112" font-size="10.5" text-anchor="middle">byte 5</text>
+  <rect class="cell" x="544" y="120" width="84" height="40"/>
+  <text class="mut" x="586.0" y="112" font-size="10.5" text-anchor="middle">byte 6</text>
+  <rect class="cell" x="628" y="120" width="84" height="40"/>
+  <text class="mut" x="670.0" y="112" font-size="10.5" text-anchor="middle">byte 7</text>
+  <rect class="bef" x="40.0" y="120" width="168.0" height="40" rx="2"/>
+  <text class="be" x="124.0" y="144.0" font-size="11.5" text-anchor="middle">VehicleSpeed</text>
+  <rect class="bef" x="208.0" y="120" width="252.0" height="40" rx="2"/>
+  <text class="be" x="334.0" y="144.0" font-size="11.5" text-anchor="middle">Odometer</text>
+  <rect class="lef" x="460.0" y="120" width="42.0" height="40" rx="2"/>
+  <rect class="lef" x="502.0" y="120" width="10.5" height="40" rx="2"/>
+  <line class="be-s" x1="124.0" y1="162" x2="124.0" y2="183" stroke-width="1" stroke-dasharray="2 2"/>
+  <text class="be" x="124.0" y="194" font-size="11" text-anchor="middle">VehicleSpeed</text>
+  <text class="mut" x="124.0" y="207" font-size="9.5" text-anchor="middle">bit 0, w16</text>
+  <line class="be-s" x1="334.0" y1="162" x2="334.0" y2="183" stroke-width="1" stroke-dasharray="2 2"/>
+  <text class="be" x="334.0" y="194" font-size="11" text-anchor="middle">Odometer</text>
+  <text class="mut" x="334.0" y="207" font-size="9.5" text-anchor="middle">bit 16, w24</text>
+  <line class="le-s" x1="481.0" y1="162" x2="481.0" y2="215" stroke-width="1" stroke-dasharray="2 2"/>
+  <text class="le" x="473.0" y="226" font-size="11" text-anchor="end">Gear</text>
+  <text class="mut" x="473.0" y="239" font-size="9.5" text-anchor="end">bit 40, w4</text>
+  <line class="le-s" x1="507.2" y1="162" x2="507.2" y2="247" stroke-width="1" stroke-dasharray="2 2"/>
+  <text class="le" x="515.2" y="258" font-size="11" text-anchor="start">Brake</text>
+  <text class="mut" x="515.2" y="271" font-size="9.5" text-anchor="start">bit 44, w1</text>
+  <rect class="bef" x="40" y="302" width="11" height="11" rx="2"/>
+  <text class="t mut" x="58" y="312" font-size="11">big-endian (Motorola)</text>
+  <rect class="lef" x="215" y="302" width="11" height="11" rx="2"/>
+  <text class="t mut" x="233" y="312" font-size="11">little-endian (Intel)</text>
+</svg>

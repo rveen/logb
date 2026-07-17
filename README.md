@@ -11,6 +11,45 @@ reference implementation in Go.
 binary twin of `.xlsx` and `jsonb` the binary form of JSON. File extension
 `.logb`.
 
+## Why another format?
+
+**The automotive industry has no open standard for test data.** The one in common
+use is [MDF](https://www.asam.net/standards/detail/mdf/) — ASAM's Measurement Data
+Format — and it is considerably better than nothing, but it is not open: the
+specification sits behind a paywall. That makes the price of writing a conforming
+reader a licence, and the price of *checking* someone else's reader another one. A
+format whose definition you cannot read is not a standard you can build on; it is
+a vendor relationship. The main alternative in CAN logging, Vector's BLF, is
+proprietary outright.
+
+That is the gap this fills. [SPEC.md](SPEC.md) is in this repository under the
+same terms as the code, it is complete enough to implement from, and a conforming
+reader is about a thousand lines plus a decompressor. There is nothing to buy and
+nobody to ask.
+
+It follows that **everything Logb knows about MDF comes from publicly available
+information** — open-source implementations, tool behaviour, published material,
+and what practitioners have written down. That is deliberate, and it also bounds
+the criticism: where this project says MDF4 leaves unaligned big-endian undefined
+([CAN.md](CAN.md)), or embeds a formula language in a conversion, or carries
+fifteen data types including a "canopen date", those are claims about what is
+publicly known, not a reading of the paywalled text. Learning from a format's
+known mistakes is most of what this design is.
+
+The other parent is the **SPICE `.raw` file** that ngspice and LTspice write. It
+gets the important things right: raw values, a self-describing header, no external
+schema, and simple enough that every EDA tool reads it. It also demonstrates the
+cost of the one thing it gets wrong — `No. Points:` is stated up front, so the
+file cannot be written until the run has finished. SPEC.md §11 is a complete
+mapping from `.raw` onto Logb, and under Logb a simulator emits frames as it
+solves, so a long transient analysis becomes watchable while it runs. That falls
+out of "nothing points forward" without being designed for.
+
+Logb is not an automotive format. It was born in that context, but the domain axis
+is general rather than time — a transient sweeps time, an AC analysis sweeps
+frequency, a sweep can be angle or distance — so bus traces, bench measurements,
+and simulator output are the same kind of file here.
+
 ## What problem it solves
 
 Most logging formats assume the writer gets to finish. They put a directory at
@@ -80,7 +119,10 @@ actually is).
 Each field declares its bit offset, width, type, byte order, and a
 **conversion** from raw to physical (`Identity`, `Linear`, `Rational`, `Table`,
 `ValueToText`, `RangeToText`). A single CAN frame routinely mixes Intel and
-Motorola signals, so byte order is per-field, not per-file.
+Motorola signals, so byte order is per-field, not per-file — and bit numbering
+follows the byte order, which is what makes the Motorola sawtooth disappear and
+reduces a DBC importer to a one-line offset transform. That story is
+[CAN.md](CAN.md).
 
 ## Example
 
@@ -263,5 +305,12 @@ go run ./cmd/logbdump /tmp/cut.logb       # 302 records, TRUNCATED
 ## Documentation
 
 - [SPEC.md](SPEC.md) — the format, 12 sections, with conformance vectors
+- [CAN.md](CAN.md) — what Logb fixes about DBC/MDF4 bit ordering, with diagrams
 - [STATUS.md](STATUS.md) — implementation state and the design decisions
 - [pkg.go.dev](https://pkg.go.dev/github.com/rveen/logb) — API reference
+
+## License
+
+[MIT](LICENSE), covering the specification as well as the code — which is the
+point of the section above. Implement it, fork it, sell it; there is nothing to
+buy and nobody to ask.

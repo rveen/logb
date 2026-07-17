@@ -1,0 +1,110 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 830 340" width="830" height="340" role="img" aria-label="Little-endian and big-endian bit numbering compared">
+  <style>
+    .bg   { fill: #ffffff; }
+    .fg   { fill: #1f2328; }
+    .mut  { fill: #656d76; }
+    .cell { fill: #ffffff; stroke: #d0d7de; }
+    .grid { stroke: #d8dee4; }
+    .axis { stroke: #8c959f; }
+    .be   { fill: #cf222e; stroke: none; }
+    .be-s { fill: none; stroke: #cf222e; }
+    .bef  { fill: #cf222e; fill-opacity: 0.13; stroke: #cf222e; }
+    .le   { fill: #0969da; stroke: none; }
+    .le-s { fill: none; stroke: #0969da; }
+    .lef  { fill: #0969da; fill-opacity: 0.13; stroke: #0969da; }
+    text  { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .t    { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    @media (prefers-color-scheme: dark) {
+      .bg   { fill: #0d1117; }
+      .fg   { fill: #e6edf3; }
+      .mut  { fill: #8b949e; }
+      .cell { fill: #0d1117; stroke: #30363d; }
+      .grid { stroke: #21262d; }
+      .axis { stroke: #6e7681; }
+      .be   { fill: #ff7b72; stroke: none; }
+      .be-s { fill: none; stroke: #ff7b72; }
+      .bef  { fill: #ff7b72; fill-opacity: 0.15; stroke: #ff7b72; }
+      .le   { fill: #79c0ff; stroke: none; }
+      .le-s { fill: none; stroke: #79c0ff; }
+      .lef  { fill: #79c0ff; fill-opacity: 0.15; stroke: #79c0ff; }
+    }
+  </style>
+  <rect class="bg" width="830" height="340"/>
+  <text class="t fg" x="40" y="30" font-size="15" font-weight="600">Bit numbering follows the byte order</text>
+  <text class="t mut" x="40" y="49" font-size="12">Same two bytes, same rule stated once per order. The shaded field is contiguous in both &#8212; that is the whole trick.</text>
+  <text class="t fg" x="60" y="82" font-size="13.5" font-weight="600">little-endian &#8212; bit n counts from the LSB of byte n/8</text>
+  <text class="t mut" x="60" y="99" font-size="11.5">bit_offset 4, width 12</text>
+  <rect class="lef" x="60" y="110" width="40" height="34" rx="2"/>
+  <text class="le" x="80.0" y="131.0" font-size="12" text-anchor="middle">7</text>
+  <rect class="lef" x="100" y="110" width="40" height="34" rx="2"/>
+  <text class="le" x="120.0" y="131.0" font-size="12" text-anchor="middle">6</text>
+  <rect class="lef" x="140" y="110" width="40" height="34" rx="2"/>
+  <text class="le" x="160.0" y="131.0" font-size="12" text-anchor="middle">5</text>
+  <rect class="lef" x="180" y="110" width="40" height="34" rx="2"/>
+  <text class="le" x="200.0" y="131.0" font-size="12" text-anchor="middle">4</text>
+  <rect class="cell" x="220" y="110" width="40" height="34" rx="2"/>
+  <text class="mut" x="240.0" y="131.0" font-size="12" text-anchor="middle">3</text>
+  <rect class="cell" x="260" y="110" width="40" height="34" rx="2"/>
+  <text class="mut" x="280.0" y="131.0" font-size="12" text-anchor="middle">2</text>
+  <rect class="cell" x="300" y="110" width="40" height="34" rx="2"/>
+  <text class="mut" x="320.0" y="131.0" font-size="12" text-anchor="middle">1</text>
+  <rect class="cell" x="340" y="110" width="40" height="34" rx="2"/>
+  <text class="mut" x="360.0" y="131.0" font-size="12" text-anchor="middle">0</text>
+  <rect class="lef" x="394" y="110" width="40" height="34" rx="2"/>
+  <text class="le" x="414.0" y="131.0" font-size="12" text-anchor="middle">15</text>
+  <rect class="lef" x="434" y="110" width="40" height="34" rx="2"/>
+  <text class="le" x="454.0" y="131.0" font-size="12" text-anchor="middle">14</text>
+  <rect class="lef" x="474" y="110" width="40" height="34" rx="2"/>
+  <text class="le" x="494.0" y="131.0" font-size="12" text-anchor="middle">13</text>
+  <rect class="lef" x="514" y="110" width="40" height="34" rx="2"/>
+  <text class="le" x="534.0" y="131.0" font-size="12" text-anchor="middle">12</text>
+  <rect class="lef" x="554" y="110" width="40" height="34" rx="2"/>
+  <text class="le" x="574.0" y="131.0" font-size="12" text-anchor="middle">11</text>
+  <rect class="lef" x="594" y="110" width="40" height="34" rx="2"/>
+  <text class="le" x="614.0" y="131.0" font-size="12" text-anchor="middle">10</text>
+  <rect class="lef" x="634" y="110" width="40" height="34" rx="2"/>
+  <text class="le" x="654.0" y="131.0" font-size="12" text-anchor="middle">9</text>
+  <rect class="lef" x="674" y="110" width="40" height="34" rx="2"/>
+  <text class="le" x="694.0" y="131.0" font-size="12" text-anchor="middle">8</text>
+  <text class="mut" x="220" y="159" font-size="11" text-anchor="middle">byte 0 = 0x12</text>
+  <text class="mut" x="554" y="159" font-size="11" text-anchor="middle">byte 1 = 0x34</text>
+  <text class="le" x="722" y="131.0" font-size="12.5" stroke="none">&#8594; 0x341</text>
+  <text class="t fg" x="60" y="212" font-size="13.5" font-weight="600">big-endian &#8212; bit n counts from the MSB of byte n/8</text>
+  <text class="t mut" x="60" y="229" font-size="11.5">bit_offset 3, width 12 &#8212; unaligned, crosses a byte boundary</text>
+  <rect class="cell" x="60" y="240" width="40" height="34" rx="2"/>
+  <text class="mut" x="80.0" y="261.0" font-size="12" text-anchor="middle">0</text>
+  <rect class="cell" x="100" y="240" width="40" height="34" rx="2"/>
+  <text class="mut" x="120.0" y="261.0" font-size="12" text-anchor="middle">1</text>
+  <rect class="cell" x="140" y="240" width="40" height="34" rx="2"/>
+  <text class="mut" x="160.0" y="261.0" font-size="12" text-anchor="middle">2</text>
+  <rect class="bef" x="180" y="240" width="40" height="34" rx="2"/>
+  <text class="be" x="200.0" y="261.0" font-size="12" text-anchor="middle">3</text>
+  <rect class="bef" x="220" y="240" width="40" height="34" rx="2"/>
+  <text class="be" x="240.0" y="261.0" font-size="12" text-anchor="middle">4</text>
+  <rect class="bef" x="260" y="240" width="40" height="34" rx="2"/>
+  <text class="be" x="280.0" y="261.0" font-size="12" text-anchor="middle">5</text>
+  <rect class="bef" x="300" y="240" width="40" height="34" rx="2"/>
+  <text class="be" x="320.0" y="261.0" font-size="12" text-anchor="middle">6</text>
+  <rect class="bef" x="340" y="240" width="40" height="34" rx="2"/>
+  <text class="be" x="360.0" y="261.0" font-size="12" text-anchor="middle">7</text>
+  <rect class="bef" x="394" y="240" width="40" height="34" rx="2"/>
+  <text class="be" x="414.0" y="261.0" font-size="12" text-anchor="middle">8</text>
+  <rect class="bef" x="434" y="240" width="40" height="34" rx="2"/>
+  <text class="be" x="454.0" y="261.0" font-size="12" text-anchor="middle">9</text>
+  <rect class="bef" x="474" y="240" width="40" height="34" rx="2"/>
+  <text class="be" x="494.0" y="261.0" font-size="12" text-anchor="middle">10</text>
+  <rect class="bef" x="514" y="240" width="40" height="34" rx="2"/>
+  <text class="be" x="534.0" y="261.0" font-size="12" text-anchor="middle">11</text>
+  <rect class="bef" x="554" y="240" width="40" height="34" rx="2"/>
+  <text class="be" x="574.0" y="261.0" font-size="12" text-anchor="middle">12</text>
+  <rect class="bef" x="594" y="240" width="40" height="34" rx="2"/>
+  <text class="be" x="614.0" y="261.0" font-size="12" text-anchor="middle">13</text>
+  <rect class="bef" x="634" y="240" width="40" height="34" rx="2"/>
+  <text class="be" x="654.0" y="261.0" font-size="12" text-anchor="middle">14</text>
+  <rect class="cell" x="674" y="240" width="40" height="34" rx="2"/>
+  <text class="mut" x="694.0" y="261.0" font-size="12" text-anchor="middle">15</text>
+  <text class="mut" x="220" y="289" font-size="11" text-anchor="middle">byte 0 = 0x12</text>
+  <text class="mut" x="554" y="289" font-size="11" text-anchor="middle">byte 1 = 0x34</text>
+  <text class="be" x="722" y="261.0" font-size="12.5" stroke="none">&#8594; 0x91A</text>
+  <text class="t mut" x="40" y="322" font-size="11">Both rows are normative conformance vectors from SPEC.md &#167;6.2. The big-endian half is exactly DBC&#8217;s Motorola convention.</text>
+</svg>

@@ -1,0 +1,113 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 425" width="760" height="425" role="img" aria-label="The Motorola sawtooth versus Logb's big-endian numbering">
+  <style>
+    .bg   { fill: #ffffff; }
+    .fg   { fill: #1f2328; }
+    .mut  { fill: #656d76; }
+    .cell { fill: #ffffff; stroke: #d0d7de; }
+    .grid { stroke: #d8dee4; }
+    .axis { stroke: #8c959f; }
+    .be   { fill: #cf222e; stroke: none; }
+    .be-s { fill: none; stroke: #cf222e; }
+    .bef  { fill: #cf222e; fill-opacity: 0.13; stroke: #cf222e; }
+    .le   { fill: #0969da; stroke: none; }
+    .le-s { fill: none; stroke: #0969da; }
+    .lef  { fill: #0969da; fill-opacity: 0.13; stroke: #0969da; }
+    text  { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .t    { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    @media (prefers-color-scheme: dark) {
+      .bg   { fill: #0d1117; }
+      .fg   { fill: #e6edf3; }
+      .mut  { fill: #8b949e; }
+      .cell { fill: #0d1117; stroke: #30363d; }
+      .grid { stroke: #21262d; }
+      .axis { stroke: #6e7681; }
+      .be   { fill: #ff7b72; stroke: none; }
+      .be-s { fill: none; stroke: #ff7b72; }
+      .bef  { fill: #ff7b72; fill-opacity: 0.15; stroke: #ff7b72; }
+      .le   { fill: #79c0ff; stroke: none; }
+      .le-s { fill: none; stroke: #79c0ff; }
+      .lef  { fill: #79c0ff; fill-opacity: 0.15; stroke: #79c0ff; }
+    }
+  </style>
+  <rect class="bg" width="760" height="425"/>
+  <text class="t fg" x="40" y="30" font-size="15" font-weight="600">One Motorola signal, two ways of numbering its bits</text>
+  <text class="t mut" x="40" y="49" font-size="12">DBC start bit 23, width 24 (the Odometer of internal/example) &#8212; y axis is the bit number each scheme gives to the signal&#8217;s n-th bit</text>
+  <text class="t fg" x="58" y="70" font-size="14" font-weight="600">Flat LSB-first numbering</text>
+  <text class="t mut" x="58" y="88" font-size="11.5">How DBC prose describes it: descend, then jump. The Motorola sawtooth.</text>
+  <line class="grid" x1="58" y1="350.0" x2="378" y2="350.0"/>
+  <text class="mut" x="50" y="353.5" font-size="10" text-anchor="end">16</text>
+  <line class="grid" x1="58" y1="263.0" x2="378" y2="263.0"/>
+  <text class="mut" x="50" y="266.5" font-size="10" text-anchor="end">24</text>
+  <line class="grid" x1="58" y1="176.1" x2="378" y2="176.1"/>
+  <text class="mut" x="50" y="179.6" font-size="10" text-anchor="end">32</text>
+  <line class="grid" x1="58" y1="100.0" x2="378" y2="100.0"/>
+  <text class="mut" x="50" y="103.5" font-size="10" text-anchor="end">39</text>
+  <line class="axis" x1="58" y1="100" x2="58" y2="350"/>
+  <line class="axis" x1="58" y1="350" x2="378" y2="350"/>
+  <path class="be-s" stroke-width="2" d="M58.0,273.9 L71.9,284.8 L85.8,295.7 L99.7,306.5 L113.7,317.4 L127.6,328.3 L141.5,339.1 L155.4,350.0 L169.3,187.0 L183.2,197.8 L197.1,208.7 L211.0,219.6 L225.0,230.4 L238.9,241.3 L252.8,252.2 L266.7,263.0 L280.6,100.0 L294.5,110.9 L308.4,121.7 L322.3,132.6 L336.3,143.5 L350.2,154.3 L364.1,165.2 L378.0,176.1"/>
+  <circle class="be" cx="58.0" cy="273.9" r="2.6"/>
+  <circle class="be" cx="71.9" cy="284.8" r="2.6"/>
+  <circle class="be" cx="85.8" cy="295.7" r="2.6"/>
+  <circle class="be" cx="99.7" cy="306.5" r="2.6"/>
+  <circle class="be" cx="113.7" cy="317.4" r="2.6"/>
+  <circle class="be" cx="127.6" cy="328.3" r="2.6"/>
+  <circle class="be" cx="141.5" cy="339.1" r="2.6"/>
+  <circle class="be" cx="155.4" cy="350.0" r="2.6"/>
+  <circle class="be" cx="169.3" cy="187.0" r="2.6"/>
+  <circle class="be" cx="183.2" cy="197.8" r="2.6"/>
+  <circle class="be" cx="197.1" cy="208.7" r="2.6"/>
+  <circle class="be" cx="211.0" cy="219.6" r="2.6"/>
+  <circle class="be" cx="225.0" cy="230.4" r="2.6"/>
+  <circle class="be" cx="238.9" cy="241.3" r="2.6"/>
+  <circle class="be" cx="252.8" cy="252.2" r="2.6"/>
+  <circle class="be" cx="266.7" cy="263.0" r="2.6"/>
+  <circle class="be" cx="280.6" cy="100.0" r="2.6"/>
+  <circle class="be" cx="294.5" cy="110.9" r="2.6"/>
+  <circle class="be" cx="308.4" cy="121.7" r="2.6"/>
+  <circle class="be" cx="322.3" cy="132.6" r="2.6"/>
+  <circle class="be" cx="336.3" cy="143.5" r="2.6"/>
+  <circle class="be" cx="350.2" cy="154.3" r="2.6"/>
+  <circle class="be" cx="364.1" cy="165.2" r="2.6"/>
+  <circle class="be" cx="378.0" cy="176.1" r="2.6"/>
+  <text class="t mut" x="218.0" y="376" font-size="11" text-anchor="middle">bit 0 of the signal &#8594; bit 23</text>
+  <text class="t fg" x="438" y="70" font-size="14" font-weight="600">Logb big-endian numbering</text>
+  <text class="t mut" x="438" y="88" font-size="11.5">bit_offset = 16, width 24. Contiguous, upward, no jumps.</text>
+  <line class="grid" x1="438" y1="350.0" x2="758" y2="350.0"/>
+  <text class="mut" x="430" y="353.5" font-size="10" text-anchor="end">16</text>
+  <line class="grid" x1="438" y1="263.0" x2="758" y2="263.0"/>
+  <text class="mut" x="430" y="266.5" font-size="10" text-anchor="end">24</text>
+  <line class="grid" x1="438" y1="176.1" x2="758" y2="176.1"/>
+  <text class="mut" x="430" y="179.6" font-size="10" text-anchor="end">32</text>
+  <line class="grid" x1="438" y1="100.0" x2="758" y2="100.0"/>
+  <text class="mut" x="430" y="103.5" font-size="10" text-anchor="end">39</text>
+  <line class="axis" x1="438" y1="100" x2="438" y2="350"/>
+  <line class="axis" x1="438" y1="350" x2="758" y2="350"/>
+  <path class="le-s" stroke-width="2" d="M438.0,350.0 L451.9,339.1 L465.8,328.3 L479.7,317.4 L493.7,306.5 L507.6,295.7 L521.5,284.8 L535.4,273.9 L549.3,263.0 L563.2,252.2 L577.1,241.3 L591.0,230.4 L605.0,219.6 L618.9,208.7 L632.8,197.8 L646.7,187.0 L660.6,176.1 L674.5,165.2 L688.4,154.3 L702.3,143.5 L716.3,132.6 L730.2,121.7 L744.1,110.9 L758.0,100.0"/>
+  <circle class="le" cx="438.0" cy="350.0" r="2.6"/>
+  <circle class="le" cx="451.9" cy="339.1" r="2.6"/>
+  <circle class="le" cx="465.8" cy="328.3" r="2.6"/>
+  <circle class="le" cx="479.7" cy="317.4" r="2.6"/>
+  <circle class="le" cx="493.7" cy="306.5" r="2.6"/>
+  <circle class="le" cx="507.6" cy="295.7" r="2.6"/>
+  <circle class="le" cx="521.5" cy="284.8" r="2.6"/>
+  <circle class="le" cx="535.4" cy="273.9" r="2.6"/>
+  <circle class="le" cx="549.3" cy="263.0" r="2.6"/>
+  <circle class="le" cx="563.2" cy="252.2" r="2.6"/>
+  <circle class="le" cx="577.1" cy="241.3" r="2.6"/>
+  <circle class="le" cx="591.0" cy="230.4" r="2.6"/>
+  <circle class="le" cx="605.0" cy="219.6" r="2.6"/>
+  <circle class="le" cx="618.9" cy="208.7" r="2.6"/>
+  <circle class="le" cx="632.8" cy="197.8" r="2.6"/>
+  <circle class="le" cx="646.7" cy="187.0" r="2.6"/>
+  <circle class="le" cx="660.6" cy="176.1" r="2.6"/>
+  <circle class="le" cx="674.5" cy="165.2" r="2.6"/>
+  <circle class="le" cx="688.4" cy="154.3" r="2.6"/>
+  <circle class="le" cx="702.3" cy="143.5" r="2.6"/>
+  <circle class="le" cx="716.3" cy="132.6" r="2.6"/>
+  <circle class="le" cx="730.2" cy="121.7" r="2.6"/>
+  <circle class="le" cx="744.1" cy="110.9" r="2.6"/>
+  <circle class="le" cx="758.0" cy="100.0" r="2.6"/>
+  <text class="t mut" x="598.0" y="376" font-size="11" text-anchor="middle">bit 0 of the signal &#8594; bit 23</text>
+  <text class="mut" x="58" y="408" font-size="10.5">23 22 ... 16 &#8594; 31 30 ... 24 &#8594; 39 38 ... 32   (descend, jump)</text>
+  <text class="mut" x="438" y="408" font-size="10.5">16 17 18 19 20 21 22 ... 39   (just count)</text>
+</svg>

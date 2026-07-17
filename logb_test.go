@@ -889,6 +889,97 @@ func TestDBCMotorola(t *testing.T) {
 	t.Logf("agreed with the DBC reference algorithm on %d cases", checked)
 }
 
+// bitSelectSig identifies a bit-selection exactly, using the fact that both
+// extractions here are linear over GF(2): every output bit is one input bit, so
+// two of them that agree on the 64 single-bit payloads agree on all 2^64. The
+// signature is therefore a complete answer to "are these the same field", not a
+// sample of one.
+func bitSelectSig(extract func(d []byte) uint64) [64]uint64 {
+	var sig [64]uint64
+	for b := range sig {
+		d := make([]byte, 8)
+		d[b/8] = 1 << (b % 8)
+		sig[b] = extract(d)
+	}
+	return sig
+}
+
+// countMotorola answers, for every DBC Motorola signal up to maxLen bits that
+// fits an 8-byte frame, whether any little-endian Logb field reads the same bits
+// in the same order.
+func countMotorola(t *testing.T, maxLen int) (total, withLE, widerThanByte int) {
+	t.Helper()
+
+	// Little-endian signatures, computed once: the inner search reuses them
+	// across all 1,552 signals.
+	leSig := map[[2]int][64]uint64{}
+	for off := 0; off < 64; off++ {
+		for w := 1; w <= maxLen && off+w <= 64; w++ {
+			leSig[[2]int{off, w}] = bitSelectSig(func(d []byte) uint64 {
+				v, err := extractBits(d, uint32(off), uint32(w), false)
+				if err != nil {
+					t.Fatalf("le off=%d w=%d: %v", off, w, err)
+				}
+				return v
+			})
+		}
+	}
+
+	for start := 0; start < 64; start++ {
+		for length := 1; length <= maxLen; length++ {
+			if _, ok := dbcMotorola(make([]byte, 8), start, length); !ok {
+				continue // the signal runs off the frame
+			}
+			total++
+			want := bitSelectSig(func(d []byte) uint64 {
+				v, _ := dbcMotorola(d, start, length)
+				return v
+			})
+			for off := 0; off+length <= 64; off++ {
+				if leSig[[2]int{off, length}] == want {
+					withLE++
+					if length > 8 {
+						widerThanByte++
+					}
+					break
+				}
+			}
+		}
+	}
+	return total, withLE, widerThanByte
+}
+
+// TestSingleByteOrderIsInsufficient is the evidence under §6.2's rejection of
+// mandating one byte order. The claim is not that a single order would be
+// inconvenient — it is that the data would be inexpressible — and a claim that
+// carries a design decision should not rest on a number someone once computed in
+// a scratch script and pasted into prose.
+//
+// It also pins the width bound honestly. The bound is where the counting stops,
+// not where the result comes from: raising it from 32 to 64 admits 528 further
+// signals and not one further equivalent, because every signal that has a
+// little-endian twin is a single byte wide and no wider bound can reach one.
+func TestSingleByteOrderIsInsufficient(t *testing.T) {
+	for _, c := range []struct {
+		maxLen, total, withLE int
+	}{
+		{32, 1552, 288}, // the population SPEC.md §6.2 quotes
+		{64, 2080, 288}, // every signal a CAN frame can hold
+	} {
+		total, withLE, widerThanByte := countMotorola(t, c.maxLen)
+		if total != c.total || withLE != c.withLE {
+			t.Errorf("Motorola signals up to %d bits: %d total, %d with a little-endian equivalent; want %d and %d",
+				c.maxLen, total, withLE, c.total, c.withLE)
+		}
+		// The load-bearing half: not one of them is wider than a single byte, so
+		// an ordinary 16-bit Motorola signal simply cannot be expressed.
+		if widerThanByte != 0 {
+			t.Errorf("maxLen=%d: %d signals wider than a byte have a little-endian equivalent; want 0",
+				c.maxLen, widerThanByte)
+		}
+	}
+}
+
 // TestBitOrderPaths checks the byte-aligned fast path against the general bit
 // loop at every offset and width, since extractBits has two implementations of
 // one rule and a divergence between them would be invisible.

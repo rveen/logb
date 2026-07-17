@@ -463,33 +463,91 @@ func TestLateClock(t *testing.T) {
 	}
 }
 
-func TestTransposeAndDeflate(t *testing.T) {
-	var out bytes.Buffer
-	w, _ := NewWriter(&out)
-	w.Codec = CodecDeflate
-	w.Filter = FilterTranspose
-	s := loggerSchema()
-	w.AddStream(s)
-	w.BeginSegment(0)
+// TestTransposeAndCodecs round-trips every codec the reference implementation
+// implements, against both filter settings. Rule 5 is the bar: what comes back
+// out must be the bytes that went in, or the codec is not a codec.
+func TestTransposeAndCodecs(t *testing.T) {
+	for _, codec := range []struct {
+		Codec
+		name string
+	}{
+		{CodecNone, "none"},
+		{CodecZstd, "zstd"}, // the format's default (§8)
+		{CodecDeflate, "deflate"},
+	} {
+		for _, filter := range []struct {
+			Filter
+			name string
+		}{
+			{FilterNone, "none"},
+			{FilterTranspose, "transpose"},
+		} {
+			t.Run(codec.name+"/"+filter.name, func(t *testing.T) {
+				var out bytes.Buffer
+				w, _ := NewWriter(&out)
+				w.Codec, w.Filter = codec.Codec, filter.Filter
+				s := loggerSchema()
+				w.AddStream(s)
+				w.BeginSegment(0)
 
-	var recs []byte
-	for i := 0; i < 500; i++ {
-		recs = append(recs, encodeLoggerRec(uint16(3000+i%3), int16(20), false)...)
-	}
-	if err := w.WriteData(s, TickVal(0), 0, 500, recs); err != nil {
-		t.Fatal(err)
-	}
-	w.Close()
+				var recs []byte
+				for i := 0; i < 500; i++ {
+					recs = append(recs, encodeLoggerRec(uint16(3000+i%3), int16(20), false)...)
+				}
+				if err := w.WriteData(s, TickVal(0), 0, 500, recs); err != nil {
+					t.Fatal(err)
+				}
+				w.Close()
 
-	r, _ := NewReader(bytes.NewReader(out.Bytes()))
-	b, err := r.Next()
+				r, _ := NewReader(bytes.NewReader(out.Bytes()))
+				b, err := r.Next()
+				if err != nil {
+					t.Fatal(err)
+				}
+				if !bytes.Equal(b.Data, recs) {
+					t.Fatalf("codec=%s filter=%s did not round-trip", codec.name, filter.name)
+				}
+				if len(r.Unsupported) != 0 {
+					t.Fatalf("codec=%s reported unsupported: %v", codec.name, r.Unsupported)
+				}
+				t.Logf("%d raw bytes -> %d on disk", len(recs), out.Len())
+			})
+		}
+	}
+}
+
+// TestZstdIsTheDefaultCodec guards §8's claim that zstd is the format's default.
+// It was the one codec the reference implementation did not implement, so a file
+// written by any other conforming writer would have decoded as "unsupported"
+// rather than as data — the failure this pins shut.
+func TestZstdIsTheDefaultCodec(t *testing.T) {
+	payload := bytes.Repeat([]byte("logb zstd round trip "), 500)
+
+	enc, err := compress(CodecZstd, payload)
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("compress: %v", err)
 	}
-	if !bytes.Equal(b.Data, recs) {
-		t.Fatal("transpose+deflate did not round-trip")
+	if len(enc) >= len(payload) {
+		t.Errorf("zstd did not compress: %d -> %d bytes", len(payload), len(enc))
 	}
-	t.Logf("2000 raw bytes -> %d on disk", out.Len())
+
+	got, err := decompress(CodecZstd, enc, uint64(len(payload)))
+	if err != nil {
+		t.Fatalf("decompress: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("zstd round trip changed the bytes")
+	}
+
+	// A lying raw_size must not decide the allocation, and must not change the
+	// answer: the buffer is a hint, the stream is the truth.
+	got, err = decompress(CodecZstd, enc, 1<<62)
+	if err != nil {
+		t.Fatalf("decompress with an absurd raw_size: %v", err)
+	}
+	if !bytes.Equal(got, payload) {
+		t.Fatal("raw_size changed the decoded bytes")
+	}
 }
 
 func TestBitExtraction(t *testing.T) {

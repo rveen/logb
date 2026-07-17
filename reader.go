@@ -7,6 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"sync"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // Reader scans frames from a Logb stream.
@@ -492,12 +495,40 @@ func (r *Reader) frame() (Frame, []byte, error) {
 	return f, payload, nil
 }
 
+// zstdDec is built once and shared: DecodeAll is safe for concurrent use, and a
+// decoder built with a nil source is the stateless one-shot form.
+var zstdDec = sync.OnceValues(func() (*zstd.Decoder, error) {
+	return zstd.NewReader(nil)
+})
+
+// maxAllocHint bounds a preallocation taken from raw_size, which is a u64 read
+// straight out of the frame and therefore states what a possibly-corrupt file
+// claims, not what is true. A damaged length field must not be able to demand an
+// arbitrary allocation before a byte has been decompressed — that would hand rule
+// 2 a way to fail: the frame is about to be rejected on CRC anyway, and it should
+// not take the process down on the way. Capping the hint costs a valid file
+// nothing, since the buffer still grows to whatever the payload really needs.
+const maxAllocHint = 16 << 20
+
+func allocHint(rawSize uint64) int {
+	if rawSize > maxAllocHint {
+		return maxAllocHint
+	}
+	return int(rawSize)
+}
+
 func decompress(c Codec, data []byte, rawSize uint64) ([]byte, error) {
 	switch c {
+	case CodecZstd:
+		d, err := zstdDec()
+		if err != nil {
+			return nil, err
+		}
+		return d.DecodeAll(data, make([]byte, 0, allocHint(rawSize)))
 	case CodecDeflate:
 		zr := flate.NewReader(bytes.NewReader(data))
 		defer zr.Close()
-		out := make([]byte, 0, rawSize)
+		out := make([]byte, 0, allocHint(rawSize))
 		buf := bytes.NewBuffer(out)
 		if _, err := io.Copy(buf, zr); err != nil {
 			return nil, err

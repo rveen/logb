@@ -1,4 +1,4 @@
-# Logb — status, 2026-07-16
+# Logb — status, 2026-07-17
 
 Handoff notes. Where the work is, what's decided, what's open, what to do next.
 
@@ -16,8 +16,10 @@ Three framing decisions, already made, that everything else follows from:
 2. **No MDF4 compatibility constraint.** Take the good ideas, drop the rest. No
    migration path is owed to existing MDF4 tooling.
 3. **Self-contained binary spec.** No CBOR, no Arrow, no XML. A conforming reader
-   is implementable with no dependencies, because the spec must outlive its
-   libraries.
+   is implementable with no dependencies beyond a decompressor, because the spec
+   must outlive its libraries. The reference implementation now takes
+   `klauspost/compress` for zstd — rule 4 always conceded that one dependency,
+   and a reader that sticks to `none`/`deflate` still needs nothing but stdlib.
 
 **The load-bearing idea: sequence, not graph.** MDF4's original sin is that it is
 a pointer graph — blocks reference each other by absolute file offset, so a writer
@@ -37,7 +39,7 @@ github.com/rveen/logb/
   wire.go        LE encode/decode helpers, transpose filter
   writer.go      Writer — needs only io.Writer; enforces run contiguity
   reader.go      Reader — needs only io.Reader; Resync(); OnFrame trace hook
-  logb_test.go   21 tests
+  logb_test.go   23 tests
   example_test.go              8 tests against the fixture (package logb_test)
   testdata/can-example.logb    15 KB, generated, golden
   internal/example/            the generator, shared by the tool and the test
@@ -45,7 +47,7 @@ github.com/rveen/logb/
   cmd/logbdump/                pretty printer
 ```
 
-29 tests, all passing.
+31 tests, all passing (37 counting subtests).
 
 ```sh
 go run ./cmd/logbgen -o /tmp/x.logb       # same bytes every run
@@ -240,12 +242,8 @@ freezable, and — still — uncommitted.
 ## Next steps
 
 1. **Commit the tree.** It is untracked.
-2. **Wire up zstd.** It is the spec's default codec but needs
-   `klauspost/compress`, which is not currently a dependency of this module and
-   was not added without asking. `CodecDeflate` works; codec dispatch is a single
-   switch in `compress`/`decompress`.
-3. **Settle open question 9** against real DBC files.
-4. **Write the ngspice importer** — `SPEC.md` §11 is a complete mapping table from
+2. **Settle open question 9** against real DBC files.
+3. **Write the ngspice importer** — `SPEC.md` §11 is a complete mapping table from
    SPICE `.raw` to Logb. The existing parser at
    `/files/go/src/github.com/rveen/ltspice/ltspice.go` reads LTspice IV (ASCII
    header) and XVII (UTF-16LE header) and is the place to start. Known quirks,
@@ -253,7 +251,7 @@ freezable, and — still — uncommitted.
    `f64` even when other variables are `f32`; LTspice stores a marker in the time
    axis's sign bit, requiring `abs()`; `Flags: compressed` is LTspice's own scheme
    and unsupported by that parser.
-5. **Consider an MDF4 importer** — `/files/go/src/golib/formats/mdf/mdf.go` is a working MDF4 reader
+4. **Consider an MDF4 importer** — `/files/go/src/golib/formats/mdf/mdf.go` is a working MDF4 reader
    (1200 lines) and the conversion is lossless in principle, even though no
    compatibility is owed.
 
@@ -261,6 +259,8 @@ freezable, and — still — uncommitted.
 
 - The INDEX frame is written and skipped on read. No seek API exists; the reader
   is single-pass by design and the index is a pure accelerator.
-- Codecs zstd and lz4 are specified but unimplemented (see next steps).
+- Codec lz4 is specified but unimplemented. zstd (the default) and deflate
+  both work; an lz4 frame is rejected and recorded in `Unsupported`, which is
+  §8's defined behaviour rather than a gap in it.
 - `cmd/logbdump` has no golden test of its own output. The fixture pins the
   bytes; nothing pins the rendering.

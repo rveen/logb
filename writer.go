@@ -6,6 +6,9 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"sync"
+
+	"github.com/klauspost/compress/zstd"
 )
 
 // Writer appends frames to a Logb stream. It never seeks: every frame is
@@ -328,8 +331,20 @@ func (w *Writer) frame(t FrameType, streamID uint16, payload []byte) error {
 	return w.write(tail[:])
 }
 
+// zstdEnc is built once and shared: EncodeAll is safe for concurrent use, and
+// standing up an encoder per DATA frame would cost more than compressing one.
+var zstdEnc = sync.OnceValues(func() (*zstd.Encoder, error) {
+	return zstd.NewWriter(nil)
+})
+
 func compress(c Codec, data []byte) ([]byte, error) {
 	switch c {
+	case CodecZstd:
+		e, err := zstdEnc()
+		if err != nil {
+			return nil, err
+		}
+		return e.EncodeAll(data, nil), nil
 	case CodecDeflate:
 		var out bytes.Buffer
 		zw, err := flate.NewWriter(&out, flate.DefaultCompression)
@@ -344,7 +359,5 @@ func compress(c Codec, data []byte) ([]byte, error) {
 		}
 		return out.Bytes(), nil
 	}
-	// zstd is the format's default codec but needs a dependency
-	// (klauspost/compress), which this reference implementation does not take.
 	return nil, fmt.Errorf("%w: %d", ErrUnknownCodec, c)
 }

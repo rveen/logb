@@ -50,6 +50,88 @@ is general rather than time — a transient sweeps time, an AC analysis sweeps
 frequency, a sweep can be angle or distance — so bus traces, bench measurements,
 and simulator output are the same kind of file here.
 
+## Isn't this a solved problem?
+
+It is a fair challenge, and it deserves a real answer rather than a dismissal.
+The honest finding is that the problem is *half* solved, twice, by two families of
+format that do not overlap — and a bus or bench recording needs both halves.
+
+**General-purpose containers solve the file and punt on the payload.**
+[MCAP](https://mcap.dev/spec) is the closest thing to Logb that exists, and it is
+genuinely good: row-oriented, append-only, chunked, zstd/lz4, attachments,
+metadata, an optional summary. If you are logging ROS or protobuf messages, stop
+reading and use it. But its messages are, in the spec's own words, *"opaque bytes
+to be decoded according to the schema of the channel"*, and its
+[schema registry](https://mcap.dev/spec/registry) lists protobuf, flatbuffer,
+ros1msg, ros2msg, ros2idl, omgidl, and jsonschema — **nothing for CAN, DBC, or
+bit-level extraction**. Record a CAN bus into MCAP and you have stored the frame;
+naming `EngineSpeed` still needs the DBC sidecar. The same is true of
+[Avro](https://avro.apache.org/docs/1.11.1/specification/), whose sync-marker
+design prefigures §4 — but its schema lives in the header, *once*, so a reader
+handed the middle of a file has framing and no meaning.
+
+**Measurement formats solve the payload and are closed, or fall short.** MDF4 has
+a real bit-level signal model and is paywalled, with unaligned big-endian left
+undefined ([CAN.md](CAN.md)). NI's
+[TDMS](https://www.ni.com/en/support/documentation/supplemental/07/tdms-file-format-internal-structure.html)
+is the near-miss that makes the point best: it is openly documented, streaming,
+and segment-structured, which is Logb's shape exactly. Then its metadata turns out
+to be *incremental* — written into a segment "only if it changes" — so a cut file
+loses everything stated earlier; its byte order is a per-segment ToC flag rather
+than per field, so a frame mixing Intel and Motorola signals is inexpressible; it
+has no bit-level fields; and it wants defragmentation and a `.tdms_index` sidecar.
+
+**HDF5 is the "just use a real scientific container" answer, and it is a
+filesystem inside a file.** The
+[format spec](https://support.hdfgroup.org/documentation/hdf5/latest/_f_m_t3.html)
+carries a superblock — found by searching byte offsets 0, 512, 1024, 2048, "and so
+on" — plus object headers, local and global heaps, a free-space manager, v1 *and*
+v2 B-trees, and five distinct index types for dataset chunks. Rule 4 says a
+conforming reader is about a thousand lines and a decompressor; an HDF5 reader is
+not within an order of magnitude of that, which is why in practice there is one
+implementation and everything else binds to it.
+
+The complexity and the fragility are the same fact. A B-tree is a mutable pointer
+structure that must be patched in place as it grows — precisely what rule 1
+forbids, and precisely why the forum threads are full of `truncated file: eof =
+…, stored_eof = …`, `h5clear`, and SWMR. Logb's index (§9) is the same idea with
+the authority removed: it is written once at the end, it is rebuildable by scan,
+and a reader that disagrees with it treats *the index* as the corrupt part. An
+index that cannot lie is an index that cannot take the file down with it.
+
+So the gap is not "another container" or "another signal model". It is that **no
+open format has both**, and the two halves cannot simply be stacked: putting a
+bit-level schema *inside* a container is what makes a cut file decodable, and
+that is a decision about the container, not a payload you can bolt on.
+
+| | Payload model | A file cut mid-write | Schema lives | Open |
+|---|---|---|---|---|
+| **Parquet / Arrow** | columnar, typed | unreadable — footer required | footer | yes |
+| **Avro** | row, typed, byte-aligned | framing survives, meaning does not | header, once | yes |
+| **MCAP** | opaque bytes + external schema | readable after `mcap recover` | before first use | yes |
+| **HDF5** | typed arrays, B-tree indexed | `h5clear`, SWMR, or lost | superblock + heaps | yes |
+| **TDMS** | typed channels, no bit fields | loses earlier metadata | incremental | documented |
+| **MDF4** | bit-level signals | links point forward | linked blocks | **paywalled** |
+| **BLF** | CAN frames | — | — | **proprietary** |
+| **DBC** | bit-level signals | it is a text sidecar, not a container | | de facto |
+| **Logb** | bit-level fields, per-field order, raw + conversion | is a valid file (rule 2) | every segment | yes |
+
+Two entries are worth dwelling on, because they are the honest ones. Parquet's
+[docs](https://parquet.apache.org/docs/file-format/) say *"file metadata is
+written after the data to allow for single pass writing"* and *"readers are
+expected to first read the file metadata"* — a fine trade for analytics, fatal for
+a logger, and the reason Parquet is a **downstream target** for Logb rather than a
+rival. And MCAP ships a `mcap recover` subcommand that "reads a potentially corrupt
+or truncated MCAP file and writes a valid, readable copy". That tool is not a flaw;
+it is a reasonable answer. It is just a different answer from rule 2, which says a
+truncated file **is** a valid file and there is nothing to run.
+
+Where the critics are right, and this should be said plainly: Logb has no
+ecosystem. MDF4 and BLF open in every automotive tool on the market and this opens
+in nothing but the reader in this repo. That is a real cost, paid deliberately
+against a spec you can read for free and a bit rule that has one defined answer at
+every offset.
+
 ## What problem it solves
 
 Most logging formats assume the writer gets to finish. They put a directory at

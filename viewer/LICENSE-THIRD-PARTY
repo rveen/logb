@@ -1,0 +1,29 @@
+Third-party components bundled with the Logb viewer.
+
+The viewer itself is MIT licensed, matching the core library. Every bundled
+component below is under a permissive license (MIT, Apache-2.0 or BSD-3). No
+component is under the GPL, LGPL, AGPL, or any other copyleft license, and no
+component is under a proprietary or source-available license.
+
+Go (server side)
+----------------
+
+github.com/rveen/logb              MIT           the core reader
+github.com/klauspost/compress      Apache-2.0    zstd, via the core reader
+github.com/google/uuid             BSD-3-Clause  via the core reader's testdata generator
+
+Nothing else. The server is otherwise Go standard library only.
+
+JavaScript (bundled into web/dist and embedded in the binary)
+-------------------------------------------------------------
+
+uPlot                              MIT           https://github.com/leeoniya/uPlot
+preact                             MIT           https://github.com/preactjs/preact
+
+Build-time only, not redistributed in the binary:
+
+vite                               MIT
+typescript                         Apache-2.0
+
+Full license texts for the bundled JavaScript components are reproduced in
+web/dist/LICENSES.txt, which ships alongside the bundle.

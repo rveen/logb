@@ -170,6 +170,33 @@ func TestExampleBytesField(t *testing.T) {
 	}
 }
 
+// TestExampleFieldMeta covers the third metadata level of SPEC.md §6.2. The
+// other two are exercised elsewhere; without this the field meta round trip is
+// only ever tested empty, which is the case that passes even when the encoder
+// and decoder disagree about whether the block is there at all.
+func TestExampleFieldMeta(t *testing.T) {
+	_, r := openGolden(t)
+	b := find(t, r, "can0.raw")
+
+	f := b.Schema.Fields[2]
+	if f.Name != "payload" {
+		t.Fatalf("field 2 is %q, want payload", f.Name)
+	}
+	if got := f.Meta["payload.encoding"]; got != "can.raw" {
+		t.Errorf("payload.encoding = %q, want can.raw", got)
+	}
+	if got := f.Meta["payload.schema"]; got != "example.dbc" {
+		t.Errorf("payload.schema = %q, want example.dbc", got)
+	}
+
+	// A field that sets no metadata must decode to nil, not to an empty map:
+	// the fixture is byte-compared, so an encoder that wrote a count where the
+	// decoder expected none would shift every following field.
+	if m := b.Schema.Fields[0].Meta; m != nil {
+		t.Errorf("can_id has no metadata but decoded %v", m)
+	}
+}
+
 // TestExampleTail exercises §6.4: the only variable-length field in the file.
 func TestExampleTail(t *testing.T) {
 	_, r := openGolden(t)
@@ -182,7 +209,7 @@ func TestExampleTail(t *testing.T) {
 	if sev.(string) != "info" {
 		t.Fatalf("severity = %v, want info", sev)
 	}
-	msg, err := b.Value(0, 1)
+	msg, err := b.Value(0, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -192,12 +219,38 @@ func TestExampleTail(t *testing.T) {
 
 	// Records after the first are the real test: a tail is parsed sequentially,
 	// so reaching record 1 means walking record 0's blob correctly.
-	msg, err = b.Value(1, 1)
+	msg, err = b.Value(1, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if msg.(string) != "coolant rising: 60 degC" {
 		t.Fatalf("second message = %q", msg)
+	}
+}
+
+// TestExampleEventAxis covers §6.7: an event stream's axis is explicit, so the
+// second event must land on its own irregular offset rather than on a multiple
+// of a step. A reader that ignored the axis field and counted records would
+// still pass TestExampleTail; this is what catches it.
+func TestExampleEventAxis(t *testing.T) {
+	_, r := openGolden(t)
+	b := find(t, r, "events")
+
+	first, err := b.Axis(0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first.Ticks() != 0 {
+		t.Errorf("first event at %d ticks, want 0", first.Ticks())
+	}
+
+	// 137_500 us at a scale of 1000 ticks of 1e-9 s.
+	second, err := b.Axis(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := second.Ticks(); got != 137_500_000 {
+		t.Errorf("second event at %d ticks, want 137500000", got)
 	}
 }
 

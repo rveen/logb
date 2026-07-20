@@ -24,7 +24,9 @@
 //     is the whole reason §6.2's bit numbering had to be settled. Odometer is
 //     unaligned big-endian and crosses byte boundaries, the case that has no
 //     defined meaning in MDF4.
-//   - events uses a variable-length string, the only §6.4 tail in the file.
+//   - events uses a variable-length string, the only §6.4 tail in the file, and
+//     is §6.7's event convention as written: an explicit axis, because events
+//     are sporadic and an implicit one would claim they were periodic.
 //   - Multiple segments restate every schema, so the file can be cut anywhere and
 //     still decode (rule 3).
 //   - One segment is written transposed and deflated, so both are exercised.
@@ -92,7 +94,15 @@ func rawSchema() *logb.Schema {
 			{Name: "dlc", BitOffset: 32, BitWidth: 8, Type: logb.TypeUint,
 				Desc: "data length code"},
 			{Name: "payload", BitOffset: 40, BitWidth: 64, Type: logb.TypeBytes,
-				Desc: "the eight wire bytes, exactly as the bus produced them"},
+				Desc: "the eight wire bytes, exactly as the bus produced them",
+				// Field-level metadata: how the payload is encoded, which is
+				// neither a unit nor prose. The named database ships as an
+				// attachment, as an artefact — never as something a reader
+				// must parse to decode the file.
+				Meta: map[string]string{
+					"payload.encoding": "can.raw",
+					"payload.schema":   "example.dbc",
+				}},
 			{Name: "t_us", BitOffset: 104, BitWidth: 32, Type: logb.TypeUint, Unit: "us",
 				Desc: "axis: microseconds since the segment's axis_base"},
 		},
@@ -165,16 +175,22 @@ func vehicleSchema() *logb.Schema {
 
 // eventSchema is the file's only variable-length field, and the only thing here
 // with a tail. §6.4 says tails exist for log strings and blobs; this is that.
+//
+// It is also §6.7's event convention as written: severity under value_to_text,
+// message in the tail, and an explicit axis. The axis has to be explicit —
+// events are sporadic, and an implicit one would space them evenly and claim
+// they were periodic.
 func eventSchema() *logb.Schema {
 	return &logb.Schema{
 		UUID:       uid("logb/example/events"),
 		Name:       "events",
-		RecordBits: 8, // severity; the message contributes no fixed bits
+		RecordBits: 40, // severity + t_us; the message contributes no fixed bits
 		AxisKind:   logb.AxisTime,
-		AxisMode:   logb.AxisImplicit,
+		AxisMode:   logb.AxisExplicit,
 		AxisExp:    -9,
 		AxisUnit:   "s",
-		AxisStep:   logb.TickVal(500_000_000), // 500 ms
+		AxisScale:  logb.TickVal(1000), // the field counts microseconds
+		AxisField:  1,
 		Fields: []logb.Field{
 			{Name: "severity", BitOffset: 0, BitWidth: 8, Type: logb.TypeUint,
 				Conv: logb.ValueToText{
@@ -182,6 +198,8 @@ func eventSchema() *logb.Schema {
 					Texts:   []string{"info", "warning", "error"},
 					Default: "?",
 				}},
+			{Name: "t_us", BitOffset: 8, BitWidth: 32, Type: logb.TypeUint, Unit: "us",
+				Desc: "axis: microseconds since the segment's axis_base"},
 			{Name: "message", Type: logb.TypeString, Variable: true,
 				Desc: "§6.4 tail: bit_width is 0, the bytes are in the tail"},
 		},
@@ -355,23 +373,28 @@ func writeSegment(vw *logb.Writer, seg int, segBase int64, rng *rand.Rand,
 	}
 
 	// events: two per segment, each with a variable-length message in the tail.
-	msgs := []struct {
+	// The offsets are deliberately irregular — that is the whole reason §6.7
+	// specifies an explicit axis, and evenly spaced ones would hide a reader
+	// that ignored the axis field and counted records instead.
+	type event struct {
 		severity byte
+		us       uint32
 		text     string
-	}{
-		{0, fmt.Sprintf("segment %d started", seg)},
-		{1, fmt.Sprintf("coolant rising: %d degC", 60+seg*3)},
+	}
+	msgs := []event{
+		{0, 0, fmt.Sprintf("segment %d started", seg)},
+		{1, 137_500, fmt.Sprintf("coolant rising: %d degC", 60+seg*3)},
 	}
 	if seg == 2 {
-		msgs = append(msgs, struct {
-			severity byte
-			text     string
-		}{2, "DTC P0301 set: cylinder 1 misfire detected"})
+		msgs = append(msgs, event{2, 402_317, "DTC P0301 set: cylinder 1 misfire detected"})
 	}
-	fixed := make([]byte, 0, len(msgs))
+	fixed := make([]byte, 0, len(msgs)*5)
 	tail := make([]byte, 0, 128)
 	for _, m := range msgs {
-		fixed = append(fixed, m.severity)
+		var rec [5]byte
+		rec[0] = m.severity
+		binary.LittleEndian.PutUint32(rec[1:], m.us)
+		fixed = append(fixed, rec[:]...)
 		var l [4]byte
 		binary.LittleEndian.PutUint32(l[:], uint32(len(m.text)))
 		tail = append(tail, l[:]...)

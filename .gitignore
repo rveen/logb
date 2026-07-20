@@ -32,3 +32,6 @@ go.work.sum
 # Editor/IDE
 # .idea/
 # .vscode/
+
+# Viewer index caches, written beside the file being viewed
+*.logbview

@@ -65,10 +65,23 @@ to be decoded according to the schema of the channel"*, and its
 [schema registry](https://mcap.dev/spec/registry) lists protobuf, flatbuffer,
 ros1msg, ros2msg, ros2idl, omgidl, and jsonschema — **nothing for CAN, DBC, or
 bit-level extraction**. Record a CAN bus into MCAP and you have stored the frame;
-naming `EngineSpeed` still needs the DBC sidecar. The same is true of
-[Avro](https://avro.apache.org/docs/1.11.1/specification/), whose sync-marker
-design prefigures §4 — but its schema lives in the header, *once*, so a reader
-handed the middle of a file has framing and no meaning.
+naming `EngineSpeed` still needs the DBC sidecar.
+
+Opacity itself is not the complaint, and it is worth being exact about that,
+because [SPEC.md §6.9](SPEC.md) makes the same call MCAP does for genuinely
+serialised payloads. **The complaint is opacity about data that is describable.**
+A CAN signal is a bit slice at a fixed offset, so an offset-based schema reaches
+it, and a format that stores it as an undecoded blob has declined to describe
+something it could have. A SOME/IP payload member sits at an offset determined by
+the values before it, so no offset-based schema reaches it, and Logb keeps the
+bytes and says so. The difference is visible in the header: Logb describes a
+SOME/IP message's sixteen fixed bytes as fields, and a schema-registry format has
+no way to.
+
+[Avro](https://avro.apache.org/docs/1.11.1/specification/) falls short somewhere
+else again: its sync-marker design prefigures §4, but its schema lives in the
+header, *once*, so a reader handed the middle of a file has framing and no
+meaning.
 
 **Measurement formats solve the payload and are closed, or fall short.** MDF4 has
 a real bit-level signal model and is paywalled, with unaligned big-endian left
@@ -388,6 +401,7 @@ go run ./cmd/logbdump /tmp/cut.logb       # 302 records, TRUNCATED
 
 - [SPEC.md](SPEC.md) — the format, 12 sections, with conformance vectors
 - [CAN.md](CAN.md) — what Logb fixes about DBC/MDF4 bit ordering, with diagrams
+- [GNSS.md](GNSS.md) — storing GNSS: scaled integers, the two clocks, and raw observables
 - [STATUS.md](STATUS.md) — implementation state and the design decisions
 - [pkg.go.dev](https://pkg.go.dev/github.com/rveen/logb) — API reference
 

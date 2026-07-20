@@ -1111,3 +1111,296 @@ var conformanceVectors = []struct {
 	{desc: "BE 6-bit within one byte", rec: []byte{0xA5}, off: 1, width: 6, big: true, want: 0x12},
 	{desc: "LE 6-bit within one byte", rec: []byte{0xA5}, off: 1, width: 6, want: 0x12},
 }
+
+// unionSchema is §6.2's tagged union: a discriminator byte and two variants
+// declared over the same bits. Without guards this schema is exactly the
+// silent-garbage case — both variants decode, both look plausible, and nothing
+// says which one the writer meant.
+func unionSchema() *Schema {
+	return &Schema{
+		UUID:       uid("logger/union"),
+		Name:       "union",
+		RecordBits: 24,
+		AxisKind:   AxisTime,
+		AxisMode:   AxisImplicit,
+		AxisExp:    -9,
+		AxisUnit:   "s",
+		AxisStep:   TickVal(1_000_000),
+		Fields: []Field{
+			{Name: "kind", BitOffset: 0, BitWidth: 8, Type: TypeUint},
+			{Name: "temp", BitOffset: 8, BitWidth: 16, Type: TypeSint, Unit: "degC",
+				Conv:    Linear{A: -40, B: 0.1},
+				Guarded: true, GuardField: 0, GuardValue: 1},
+			// Same sixteen bits as temp. That is the point.
+			{Name: "rpm", BitOffset: 8, BitWidth: 16, Type: TypeUint, Unit: "1/min",
+				Conv:    Linear{A: 0, B: 0.25},
+				Guarded: true, GuardField: 0, GuardValue: 2},
+		},
+	}
+}
+
+func TestGuardedFields(t *testing.T) {
+	var out bytes.Buffer
+	w, err := NewWriter(&out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s := unionSchema()
+	if err := w.AddStream(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.BeginSegment(0); err != nil {
+		t.Fatal(err)
+	}
+
+	// Record 0 is a temp variant, record 1 an rpm variant. The payloads are
+	// chosen so that misreading one as the other yields a plausible number
+	// rather than an obvious one: 0x0064 is 10.0 degC and also 25 rpm.
+	rec := []byte{1, 0x64, 0x00, 2, 0x64, 0x00}
+	if err := w.WriteData(s, TickVal(0), 0, 2, rec); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := NewReader(bytes.NewReader(out.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := r.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// The guard survived the wire: an unguarded field decoded as guarded (or
+	// the reverse) would shift every following field, so this is also a check
+	// that the conditional encoding is read back in step.
+	if f := b.Schema.Fields[1]; !f.Guarded || f.GuardField != 0 || f.GuardValue != 1 {
+		t.Fatalf("temp guard lost in transit: %+v", f)
+	}
+	if b.Schema.Fields[0].Guarded {
+		t.Error("kind is not guarded but decoded as though it were")
+	}
+
+	// Record 0: temp is live, rpm is absent.
+	v, err := b.Value(0, 1)
+	if err != nil {
+		t.Fatalf("temp on the temp variant: %v", err)
+	}
+	if got := v.(float64); got != -30 {
+		t.Errorf("temp = %v, want -30", got)
+	}
+	if _, err := b.Value(0, 2); !errors.Is(err, ErrFieldAbsent) {
+		t.Errorf("rpm on the temp variant: err = %v, want ErrFieldAbsent", err)
+	}
+
+	// Record 1: the mirror image. If this returned 25 rpm the guard did nothing
+	// and the bits were read anyway.
+	v, err = b.Value(1, 2)
+	if err != nil {
+		t.Fatalf("rpm on the rpm variant: %v", err)
+	}
+	if got := v.(float64); got != 25 {
+		t.Errorf("rpm = %v, want 25", got)
+	}
+	if _, err := b.Value(1, 1); !errors.Is(err, ErrFieldAbsent) {
+		t.Errorf("temp on the rpm variant: err = %v, want ErrFieldAbsent", err)
+	}
+
+	// Absent must reach Raw as well as Value. A guard checked only in Value
+	// would leak the bits to anyone reading raw counts.
+	if _, err := b.Raw(1, 1); !errors.Is(err, ErrFieldAbsent) {
+		t.Errorf("Raw on an absent field: err = %v, want ErrFieldAbsent", err)
+	}
+}
+
+// TestGuardOnBool covers the width normalisation: a bool guard is one bit
+// however the schema spelled its width.
+func TestGuardOnBool(t *testing.T) {
+	s := &Schema{
+		UUID: uid("logger/boolguard"), Name: "bg", RecordBits: 16,
+		AxisKind: AxisTime, AxisMode: AxisImplicit, AxisExp: -9, AxisUnit: "s",
+		AxisStep: TickVal(1),
+		Fields: []Field{
+			{Name: "valid", BitOffset: 0, BitWidth: 1, Type: TypeBool},
+			{Name: "reading", BitOffset: 8, BitWidth: 8, Type: TypeUint,
+				Guarded: true, GuardField: 0, GuardValue: 1},
+		},
+	}
+	if err := s.Validate(); err != nil {
+		t.Fatal(err)
+	}
+
+	b := &Batch{Schema: s}
+	set, err := b.guardSatisfied([]byte{0x01, 0x2a}, &s.Fields[1])
+	if err != nil || !set {
+		t.Errorf("guard on a set bool = %v (%v), want true", set, err)
+	}
+	clear, err := b.guardSatisfied([]byte{0x00, 0x2a}, &s.Fields[1])
+	if err != nil || clear {
+		t.Errorf("guard on a clear bool = %v (%v), want false", clear, err)
+	}
+}
+
+// TestBadGuardsRejected: every one of these is decidable from the schema, so
+// Validate must refuse it before a single record is read.
+func TestBadGuardsRejected(t *testing.T) {
+	base := func(fields ...Field) *Schema {
+		return &Schema{
+			UUID: uid("logger/badguard"), Name: "bad", RecordBits: 32,
+			AxisKind: AxisTime, AxisMode: AxisImplicit, AxisExp: -9,
+			AxisUnit: "s", AxisStep: TickVal(1), Fields: fields,
+		}
+	}
+	kind := Field{Name: "kind", BitOffset: 0, BitWidth: 8, Type: TypeUint}
+
+	cases := []struct {
+		name   string
+		schema *Schema
+	}{
+		{"guard field does not exist", base(
+			kind,
+			Field{Name: "v", BitOffset: 8, BitWidth: 8, Type: TypeUint,
+				Guarded: true, GuardField: 9, GuardValue: 1},
+		)},
+		{"field guards on itself", base(
+			kind,
+			Field{Name: "v", BitOffset: 8, BitWidth: 8, Type: TypeUint,
+				Guarded: true, GuardField: 1, GuardValue: 1},
+		)},
+		{"guard on a float", base(
+			Field{Name: "f", BitOffset: 0, BitWidth: 32, Type: TypeFloat},
+			Field{Name: "v", BitOffset: 0, BitWidth: 8, Type: TypeUint,
+				Guarded: true, GuardField: 0, GuardValue: 1},
+		)},
+		{"guard on a blob", base(
+			Field{Name: "blob", BitOffset: 0, BitWidth: 16, Type: TypeBytes},
+			Field{Name: "v", BitOffset: 16, BitWidth: 8, Type: TypeUint,
+				Guarded: true, GuardField: 0, GuardValue: 1},
+		)},
+		{"guard on a variable field", base(
+			Field{Name: "msg", Type: TypeString, Variable: true},
+			Field{Name: "v", BitOffset: 0, BitWidth: 8, Type: TypeUint,
+				Guarded: true, GuardField: 0, GuardValue: 1},
+		)},
+		{"guards do not chain", base(
+			kind,
+			Field{Name: "mid", BitOffset: 8, BitWidth: 8, Type: TypeUint,
+				Guarded: true, GuardField: 0, GuardValue: 1},
+			Field{Name: "v", BitOffset: 16, BitWidth: 8, Type: TypeUint,
+				Guarded: true, GuardField: 1, GuardValue: 1},
+		)},
+	}
+
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			err := c.schema.Validate()
+			if !errors.Is(err, ErrBadGuard) {
+				t.Errorf("Validate = %v, want ErrBadGuard", err)
+			}
+		})
+	}
+}
+
+// TestOnSchemaSeesSilentStreams is the reason Reader.OnSchema exists.
+//
+// Next only ever hands out a schema attached to a batch, so a stream that was
+// declared and never wrote a record is invisible through it. That is not a
+// corner case: a channel configured but never triggered is a normal thing for
+// a file to contain, and a tool listing a file's contents has to be able to
+// say so.
+func TestOnSchemaSeesSilentStreams(t *testing.T) {
+	loud := loggerSchema()
+
+	// A second stream, declared alongside the first, that never writes.
+	silent := loggerSchema()
+	silent.UUID = uid("logger/silent")
+	silent.Name = "silent"
+
+	var out bytes.Buffer
+	w, _ := NewWriter(&out)
+	for _, s := range []*Schema{loud, silent} {
+		if err := w.AddStream(s); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.WriteData(loud, TickVal(0), 0, 1, encodeLoggerRec(3200, 90, false)); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := NewReader(bytes.NewReader(out.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var declared []string
+	var ids []uint16
+	r.OnSchema = func(s *Schema, id uint16) {
+		declared = append(declared, s.Name)
+		ids = append(ids, id)
+	}
+	var carried []string
+	for {
+		b, err := r.Next()
+		if err != nil {
+			break
+		}
+		carried = append(carried, b.Schema.Name)
+	}
+
+	if len(declared) != 2 || declared[0] != "engine" || declared[1] != "silent" {
+		t.Errorf("declared = %v, want [engine silent]", declared)
+	}
+	if len(carried) != 1 || carried[0] != "engine" {
+		t.Errorf("carried = %v, want [engine]: only one stream wrote records", carried)
+	}
+	// The ids are the segment-scoped routing tags the schemas were bound to.
+	// They are what a caller needs to match a later DATA frame to a schema.
+	if len(ids) != 2 || ids[0] == ids[1] {
+		t.Errorf("ids = %v, want two distinct bindings", ids)
+	}
+}
+
+// TestOnSchemaRebindsPerSegment pins the segment scoping. Concatenating two
+// files gives every stream a fresh binding, so OnSchema fires again with ids
+// that mean something different (§6.6).
+func TestOnSchemaRebindsPerSegment(t *testing.T) {
+	one := func() []byte {
+		var out bytes.Buffer
+		w, _ := NewWriter(&out)
+		s := loggerSchema()
+		if err := w.AddStream(s); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.WriteData(s, TickVal(0), 0, 1, encodeLoggerRec(1000, 20, false)); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		return out.Bytes()
+	}
+
+	// Byte concatenation, minus the second file's 16-byte header: the same
+	// join TestConcat makes.
+	a, b := one(), one()
+	joined := append(append([]byte{}, a...), b[16:]...)
+
+	r, err := NewReader(bytes.NewReader(joined))
+	if err != nil {
+		t.Fatal(err)
+	}
+	n := 0
+	r.OnSchema = func(*Schema, uint16) { n++ }
+	for {
+		if _, err := r.Next(); err != nil {
+			break
+		}
+	}
+	if n != 2 {
+		t.Errorf("OnSchema fired %d times, want 2: each segment restates its schemas", n)
+	}
+}

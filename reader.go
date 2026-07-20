@@ -56,6 +56,23 @@ type Reader struct {
 	// A nil OnFrame costs one branch per frame.
 	OnFrame func(Frame)
 
+	// OnSchema, if set, is called each time a SCHEMA frame binds a stream,
+	// with the id it was bound to. Like OnFrame it fires during Next.
+	//
+	// It exists because Next only ever hands out a schema attached to a batch,
+	// and a stream can be declared without carrying a single record — a channel
+	// that was configured but never fired, a segment restated after a cut. Such
+	// a stream is part of what the file says, and a tool that lists a file's
+	// contents has no other way to see it.
+	//
+	// The id is passed because it is the only thing that distinguishes two
+	// bindings of the same schema, and because it is segment-scoped: every SYNC
+	// frame rebinds every id (§6.6), so a caller accumulating across segments
+	// must key on Schema.UUID and treat the id as routing, not identity.
+	//
+	// A nil OnSchema costs one branch per schema frame.
+	OnSchema func(s *Schema, streamID uint16)
+
 	streams map[uint16]*Schema // segment-scoped; cleared at every sync frame
 	runs    map[uint32]*Run
 	seq     uint64
@@ -117,6 +134,24 @@ func (b *Batch) Raw(i, f int) (any, error) {
 	}
 	fd := &b.Schema.Fields[f]
 
+	// §6.2: an unsatisfied guard means the field is not in this record. This
+	// runs before either branch below, including the variable one — a guarded
+	// tail field still occupies its slot, so the tail stays walkable without
+	// resolving discriminators, but its bytes are not this record's value.
+	if fd.Guarded {
+		rec, err := b.Record(i)
+		if err != nil {
+			return nil, err
+		}
+		ok, err := b.guardSatisfied(rec, fd)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, ErrFieldAbsent
+		}
+	}
+
 	if fd.Variable {
 		k := b.Schema.varOrdinal(f)
 		if i < 0 || i >= len(b.tails) || k < 0 || k >= len(b.tails[i]) {
@@ -137,6 +172,31 @@ func (b *Batch) Raw(i, f int) (any, error) {
 		return nil, err
 	}
 	return rawValue(rec, fd)
+}
+
+// guardSatisfied reports whether fd's guard holds for the record in rec.
+//
+// The comparison is on raw bits, never on the converted value: a discriminator
+// under a linear conversion would be compared as a float, and float equality is
+// the silent-failure case this flag exists to prevent (§6.2).
+func (b *Batch) guardSatisfied(rec []byte, fd *Field) (bool, error) {
+	// Schema.Validate refuses an out-of-range guard, but a schema may arrive
+	// from a file whose writer never ran it.
+	if int(fd.GuardField) >= len(b.Schema.Fields) {
+		return false, ErrCorrupt
+	}
+	g := &b.Schema.Fields[fd.GuardField]
+
+	// A bool is one bit wide however the schema spelled it.
+	width := g.BitWidth
+	if g.Type == TypeBool {
+		width = 1
+	}
+	v, err := extractBits(rec, g.BitOffset, width, g.BigEndian)
+	if err != nil {
+		return false, err
+	}
+	return v == fd.GuardValue, nil
 }
 
 // Value decodes field f of record i and applies its conversion.
@@ -271,6 +331,9 @@ func (r *Reader) Next() (*Batch, error) {
 			}
 			s.id = streamID
 			r.streams[streamID] = s
+			if r.OnSchema != nil {
+				r.OnSchema(s, streamID)
+			}
 
 		case FrameRun:
 			d := &dec{b: payload}
@@ -359,10 +422,17 @@ func (r *Reader) decodeSchema(payload []byte) (*Schema, error) {
 		f.BitWidth = d.u32()
 		f.Type = DataType(d.u8())
 		f.BigEndian = d.u8() == 1
-		f.Variable = d.u8()&1 != 0
+		flags := d.u8()
+		f.Variable = flags&1 != 0
+		f.Guarded = flags&2 != 0
 		f.Unit = d.str()
 		f.Desc = d.str()
 		f.Conv = d.conv()
+		if f.Guarded {
+			f.GuardField = d.u16()
+			f.GuardValue = d.u64()
+		}
+		f.Meta = d.kv()
 		s.Fields = append(s.Fields, f)
 	}
 	s.Meta = d.kv()

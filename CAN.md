@@ -249,3 +249,4 @@ Two further things fall out, both of which matter more than they look:
 - [SPEC.md §6.3](SPEC.md) — data types, and why `byte_order` is per field
 - [`logb_test.go`](logb_test.go) — `TestDBCMotorola`, `TestConformanceVectors`
 - [`internal/example`](internal/example/example.go) — the mixed frame above
+- [GNSS.md](GNSS.md) — the same raw-preserved, signals-overlaid argument for GNSS

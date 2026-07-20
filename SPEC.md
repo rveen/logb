@@ -406,14 +406,80 @@ it nothing.
      1   data_type      §6.3
      1   byte_order     0=little, 1=big
      1   flags          bit0: variable-length (payload in tail, §6.4)
+                    bit1: guarded (present only for some records, below)
      4   unit_len + unit        UTF-8, e.g. "km/h", "" if dimensionless
      4   desc_len + desc
      n   conversion             §7
+     2   guard_field            u16, present only if flags bit1
+     8   guard_value            u64, present only if flags bit1
+     4   meta_count + meta[]    inline key/value pairs, as §6.1
 ```
+
+**Metadata exists at all three levels** — file (META frame, §3.3), stream (§6.1),
+and field. `unit` and `desc` are promoted to their own slots because every
+consumer wants them and neither should cost a key lookup; everything else about a
+field goes here. This is what §11 uses to carry a SPICE variable's type column
+(`voltage`, `device_current`), which is neither a unit nor prose, and it is where
+a `bytes` field states how its payload is encoded if it is a serialised message.
+
+The cost is four bytes per field for the empty case, paid once per schema
+restatement rather than per record, which is the same trade §6.1 already accepts
+one level up. Dropping the level instead was the alternative, and it fails on its
+own terms: §10 rejects MDF4's XML metadata on the grounds that key/value replaces
+it, and MDF4 carries channel-level metadata. Replacing two of three levels is not
+replacing it.
 
 Fields may overlap and need not be byte-aligned. A 1-bit flag at bit offset 37 of
 a 64-bit CAN payload is expressible directly, which is the whole reason the
 bit-level model exists and why an Arrow-based substrate could not have worked.
+
+#### Guarded fields
+
+Overlap says *these bits have several interpretations*. It cannot say **which one
+is live**. A CAN message whose layout depends on a mode byte, a multiplexed DBC
+signal, a variant record: in each, the same bits mean different things in
+different records, and a reader handed the overlapping declarations alone decodes
+every variant and returns plausible garbage for all but one. That is this
+format's designated failure mode (CAN.md), one level up from bit numbering.
+
+`flags` bit 1 marks a field **guarded**: it is present in a record only when
+field `guard_field` of that record holds the raw value `guard_value`. A tagged
+union is then a discriminator field plus one guarded field per variant, all
+overlapping.
+
+The comparison is on the **raw** value, before conversion. Comparing physical
+values would mean float equality against the output of a linear conversion —
+precisely the comparison that fails silently. Raw bits are an exact integer and
+compare exactly.
+
+**A reader that meets an unsatisfied guard MUST report the field absent and MUST
+NOT return a value for it** — not zero, not the bits that happen to sit there.
+An absent field is not a zero field, and a reader that conflates them has
+reintroduced the bug the flag exists to remove.
+
+Constraints, all decidable when the SCHEMA frame is read:
+
+- `guard_field` MUST index a field of this schema and MUST NOT be the guarded
+  field itself.
+- The guard field MUST be `uint`, `sint`, or `bool` — a type with exact raw
+  bits. Floats compare badly and a blob has no `u64` to compare.
+- The guard field MUST NOT itself be guarded, and MUST NOT be variable-length.
+  **Guards do not chain.** One level is what a tagged union needs; more buys
+  conditional logic a reader must evaluate as a graph, with cycles to detect,
+  and nothing this format can name.
+- A reader MUST reject such a schema rather than the record, because all of it
+  is knowable before any data arrives.
+
+**A guarded variable-length field still occupies its tail slot in every record**,
+writing a zero length when absent (§6.4). The tail must stay walkable without
+evaluating guards — a reader that had to resolve a discriminator to find the
+next record's bytes would be doing layout by data, and §6.4's sequential walk is
+already the expensive part.
+
+Guarded fields cost **zero bytes per record**: the guard lives in the schema, and
+the discriminator is an ordinary field the record already carried. This is
+MDF 4.3's CVBLOCK without the block. Its CUBLOCK — several descriptions valid at
+once — is plain overlap, and has been supported all along.
 
 #### Bit numbering
 
@@ -656,6 +722,176 @@ should merge across files, random UUIDv4 where they should not. The spec's only
 rule is that equal uuid means same logical stream, and it is the writer's job to
 make that true.
 
+### 6.7 Events
+
+An event — a trigger firing, a driver action, a sensor dropout, a test-step
+boundary — is a **stream**. There is no event frame type and none is needed. The
+convention is written down here because a convention that is merely possible gets
+invented twice, differently, and then neither reader finds the other's events.
+
+```
+name        "events", or "<source>.events"
+axis_kind   time
+axis_mode   explicit — events are sporadic, and an implicit axis would
+                       claim they are periodic
+fields      severity  uint, value_to_text {0=info, 1=warning, 2=error}
+            message   string, variable-length (§6.4)
+```
+
+`severity` and `message` are the two a reader may assume are present. Everything
+else is an ordinary field and needs no blessing: a `duration` in ticks turns a
+point event into a range, a `code` uint carries a machine-readable identifier
+beside the prose, a `source` string says which subsystem raised it.
+
+**Why a stream rather than a frame type.** An event *is* a record. It has an axis
+position, it wants a conversion — `value_to_text` is exactly what renders a
+severity byte as prose — it is indexed by §9 like any other stream, it compresses
+with its neighbours, and it survives §4's resync because its schema is restated
+in every segment. A dedicated frame type would have to re-earn all five, and
+would still not be seekable. MDF4 spends a block type here; the cost of not
+having one is this paragraph.
+
+**A META frame is not the alternative**, and that is the gap this convention
+closes. META (§3.3) is key/value with nowhere to put an axis position: it can say
+what a file *is*, never what happened at t=12.34 s. `time.anchor` (§5.2) looks
+like a counterexample and is the proof — it carries both its timestamps inside
+its own value string precisely because the frame has no field to hold one.
+
+### 6.8 GNSS
+
+MDF 4.3 standardises GNSS storage as an *associated standard* — an agreement
+about how positional data is identified, not a change to the container. This is
+the equivalent, and like §6.7 it needs no new machinery. The reasoning is in
+[GNSS.md](GNSS.md); what follows is the vocabulary.
+
+Three streams, because a receiver emits three shapes of data:
+
+| Stream | One record per | Carries |
+|---|---|---|
+| `gnss.pvt` | epoch | position, velocity, accuracy |
+| `gnss.status` | epoch | fix quality, satellite count, DOP |
+| `gnss.raw` | satellite-observation | pseudorange, carrier phase, doppler, C/N0 |
+
+**The axis is `time`, `explicit`, and the base is the logger's clock.** A GNSS
+solution is nominally periodic and is not — epochs go missing under bridges — so
+an implicit axis would mis-timestamp every record after the first dropout while
+leaving the file well-formed. Receiver time is *data*, carried in a field
+(`itow`, or a UTC field), never the axis: the difference between the two is
+receiver-to-logger latency, and it is only recoverable if both are stored. A
+logger that boots without an RTC uses `time.base = monotonic` and binds the file
+to wall clock with `time.anchor` (§5.2) once a fix arrives.
+
+**Coordinates are stored as the receiver's integers with a declared conversion**,
+never as floats. This is rule 5, and it is load-bearing rather than stylistic:
+`f32` degrees resolves to 60 cm at 45° latitude and 2.4 m near 180°.
+
+| Field | Type | Conversion | Unit |
+|---|---|---|---|
+| `lat`, `lon` | `sint` 32 | `linear` b=1e-7 | `deg` |
+| `h_ell` | `sint` 32 | `linear` b=0.001 | `m` |
+| `h_msl` | `sint` 32 | `linear` b=0.001 | `m` |
+| `vel_n`, `vel_e`, `vel_d` | `sint` 32 | `linear` b=0.001 | `m/s` |
+| `heading` | `sint` 32 | `linear` b=1e-5 | `deg` |
+| `h_acc`, `v_acc` | `uint` 32 | `linear` b=0.001 | `m` |
+| `itow` | `uint` 32 | `identity` | `ms` |
+| `fix_type` | `uint` 8 | `value_to_text` | — |
+| `num_sv` | `uint` 8 | `identity` | — |
+| `pdop`, `hdop`, `vdop` | `uint` 16 | `linear` b=0.01 | — |
+| `sv_id`, `constellation` | `uint` 8 | `identity` \| `value_to_text` | — |
+| `pseudorange` | `float` 64 | `identity` | `m` |
+| `carrier_phase` | `float` 64 | `identity` | `cycles` |
+| `doppler` | `float` 32 | `identity` | `Hz` |
+| `cn0` | `uint` 8 | `identity` | `dBHz` |
+
+**Height is never called `alt`.** Ellipsoidal and mean-sea-level heights differ
+by up to about 100 m, and a file that does not say which it stored has stored a
+number that is wrong by that much for anyone who assumes the other.
+
+`fix_type` follows NMEA `GGA`'s quality indicator, the one encoding every
+receiver can produce — `0` none, `1` gnss, `2` dgnss, `4` rtk_fixed,
+`5` rtk_float, `6` dead_reckoning. Note that fixed is 4 and float is 5: the
+better solution carries the lower number.
+
+Stream META (§6.1) carries what is constant and what the coordinates are
+meaningless without:
+
+| Key | Example | Why |
+|---|---|---|
+| `gnss.frame` | `WGS84` | ETRS89 and ITRF diverge ~2.5 cm/year |
+| `gnss.height_ref` | `ellipsoid` \| `geoid` | which height the file stored |
+| `gnss.antenna_offset_m` | `0,0,1.42` | the receiver reports the antenna |
+| `gnss.leap_s` | `18` | makes GPS↔UTC reversible later |
+| `gnss.receiver` | `u-blox ZED-F9P` | |
+
+Raw receiver messages — NMEA, UBX, RTCM — go in a fixed `bytes` field with
+`payload.encoding` in field metadata (§6.2), and decoded streams may overlay the
+same bytes, exactly as §6.2 and CAN.md describe for a CAN payload.
+
+A stream that omits fields it has no data for is conforming. A stream that uses
+these names for other quantities is not.
+
+### 6.9 Protocol payloads
+
+§6.7 and §6.8 are conventions for particular payloads. This is the rule that
+decides the *next* one, stated once so that a new protocol costs no new section:
+
+> **A protocol's fixed-layout header becomes fields. A payload whose layout
+> depends on its own content stays `bytes`, with `payload.encoding` declared in
+> field metadata (§6.2), its definition carried as an ATTACH frame, and — where a
+> decoder exists — its decoded form written as a second stream.**
+
+The line is not convenience, it is arithmetic. A field is `bit_offset` plus
+`bit_width` *in the schema*, so a reader computes where it is without consulting
+the data. A CAN frame, an Ethernet header, a SOME/IP header and an IP header
+satisfy that. A serialised message generally does not: a dynamic-length array
+carries its length inline, so every member after it sits at an offset determined
+by the *values* of the members before it. That is layout by data, and §6.2
+already refuses it — a guarded variable-length field keeps its tail slot for
+exactly this reason.
+
+Admitting such payloads as fields means a reader that interprets nested structs,
+dynamic arrays and optional members: a type system, unbounded in size, inside
+what rule 4 caps at about a thousand lines. The bytes are kept instead, exactly
+as they arrived (rule 5), and nothing is lost that the file ever had.
+
+**What self-describing covers.** This format promises that a file alone is enough
+to locate every field, know its type, and convert it to a physical value. It does
+not promise that a file alone explains what an application meant by it. The DBC
+already sits on that line and always has (§6.2): the schema names `EngineSpeed`
+and gives it `rpm`, while the database ships as an artefact. A serialised payload
+moves the line rather than crossing it, because there it is the *layout* that
+needs the parser and not only the meaning.
+
+**The decoder is what keeps the promise whole.** A logger that can decode writes
+both: the wire bytes, and a second stream whose fields are the decoded members at
+resolved offsets. A dynamic-layout message becomes a fixed-layout record at
+decode time, and everything downstream of that decoder gets the full guarantee —
+schema, conversions, index, resync. This is the `can0.raw` and `EngineData`
+pattern of §6.2 applied one protocol up, and it is why the format does not need a
+type system: the decoder flattens, and the format stores what was flattened. A
+message carrying *N* elements follows §10 — one record per element.
+
+**Example: SOME/IP.** Sixteen bytes of header, byte-aligned and big-endian
+throughout, become ordinary fields; the payload does not.
+
+| Field | Type | Notes |
+|---|---|---|
+| `service_id`, `method_id` | `uint` 16, big | method high bit set = event |
+| `length` | `uint` 32, big | covers `client_id` onward |
+| `client_id`, `session_id` | `uint` 16, big | session correlates request to response |
+| `protocol_ver`, `interface_ver` | `uint` 8 | |
+| `message_type` | `uint` 8 | `value_to_text`: request, notification, response, error |
+| `return_code` | `uint` 8 | `value_to_text`; guarded on `message_type` (§6.2) |
+| `payload` | `bytes` | `payload.encoding = someip` |
+
+That is enough to filter by service, correlate a response to its request, count
+error codes, and find where a service went quiet — none of which needs the
+interface definition. Reassembling segmented messages is a decoder's job, not a
+container's: the logger stores segments as received.
+
+This section is deliberately the only one of its kind. A standard per protocol is
+how a format ends up with seven of them.
+
 ## 7. Conversion
 
 Raw stored value → physical value. The conversion is part of the field, encoded as
@@ -787,6 +1023,17 @@ Things MDF4 has that this draft rejects, and why:
 - **The algebraic conversion** — see §7.
 - **Separate signal-data (SD) blocks for variable-length channels** — replaced by
   record tails.
+- **Event blocks** — an event log is an ordinary stream, and gets an axis, a
+  conversion, an index entry, and resync for free by being one (§6.7).
+- **Dynamic data: a varying number of signals per record** (MDF 4.3's DSBLOCK and
+  CLBLOCK). This is rule 6 — fixed cost per record — and the rule wins. The cases
+  it exists for are radar object lists, LiDAR point clouds, and GNSS raw
+  observables, and all three are better served by **one record per element**: a
+  detection, a point, a satellite-observation, grouped by a shared axis value or
+  an explicit `epoch` field. That keeps the per-record cost fixed, keeps the
+  batch seekable, and lets `filter=transpose` (§8) work on the bulkiest data in
+  the file — none of which survives packing a variable-length blob per epoch.
+  [GNSS.md](GNSS.md) works the trade through on a real payload.
 
 ## 11. Mapping: SPICE raw files
 

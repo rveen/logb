@@ -1,0 +1,625 @@
+:root {
+  --bg: #ffffff;
+  --panel: #f6f7f9;
+  --border: #dfe3e8;
+  --text: #1b1f24;
+  --muted: #6b7681;
+  --accent: #2f7fd1;
+  --warn: #b8860b;
+  --ok: #2e7d32;
+  color-scheme: light dark;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #14171a;
+    --panel: #1b1f23;
+    --border: #2b3137;
+    --text: #e6e9ec;
+    --muted: #8b959e;
+    --accent: #4a9eea;
+    --warn: #d0a232;
+    --ok: #6cc070;
+  }
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#app {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  font: 13px/1.45 ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
+  background: var(--bg);
+  color: var(--text);
+}
+
+.app {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.loading,
+.fatal {
+  padding: 2rem;
+  color: var(--muted);
+}
+.fatal {
+  color: #c0392b;
+  white-space: pre-wrap;
+}
+
+/* header ------------------------------------------------------------------ */
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.5rem 0.9rem;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+}
+
+.title {
+  display: flex;
+  align-items: baseline;
+  gap: 0.6rem;
+}
+
+.status {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.muted {
+  color: var(--muted);
+  font-size: 0.92em;
+}
+
+.pill {
+  padding: 0.1rem 0.45rem;
+  border-radius: 999px;
+  font-size: 0.8em;
+  border: 1px solid currentColor;
+}
+.pill.warn {
+  color: var(--warn);
+}
+.pill.ok {
+  color: var(--ok);
+}
+
+.reset {
+  border: 1px solid var(--border);
+  background: var(--bg);
+  color: var(--text);
+  border-radius: 4px;
+  padding: 0.2rem 0.55rem;
+  cursor: pointer;
+}
+.reset:hover {
+  border-color: var(--accent);
+}
+
+/* layout ------------------------------------------------------------------ */
+
+.body {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+}
+
+.side {
+  width: 300px;
+  flex: none;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  background: var(--panel);
+  padding-bottom: 2rem;
+}
+
+.charts {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  padding: 0.6rem;
+}
+
+.empty {
+  padding: 2rem;
+  max-width: 42rem;
+}
+
+/* tree -------------------------------------------------------------------- */
+
+.tree .stream > header {
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem 0.7rem 0.25rem;
+  border-top: 1px solid var(--border);
+}
+.stream-name {
+  font-weight: 600;
+}
+
+.tree ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.field {
+  display: flex;
+  align-items: center;
+  gap: 0.35rem;
+  flex-wrap: wrap;
+  padding: 0 0.7rem;
+}
+
+.field > button {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.4rem;
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  padding: 0.18rem 0.25rem;
+  border-radius: 4px;
+  cursor: pointer;
+}
+.field > button:hover {
+  background: color-mix(in srgb, var(--accent) 14%, transparent);
+}
+.field.on > button {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  font-weight: 600;
+}
+
+.field.disabled {
+  color: var(--muted);
+  padding-block: 0.18rem;
+  cursor: help;
+}
+
+.field-name.group {
+  padding: 0.18rem 0.25rem;
+  font-weight: 600;
+}
+
+.runs {
+  width: 100%;
+  padding-left: 0.9rem !important;
+}
+.runs button {
+  background: none;
+  border: none;
+  color: inherit;
+  font: inherit;
+  padding: 0.12rem 0.25rem;
+  border-radius: 4px;
+  cursor: pointer;
+  width: 100%;
+  text-align: left;
+}
+.runs li.on button {
+  background: color-mix(in srgb, var(--accent) 24%, transparent);
+  font-weight: 600;
+}
+
+.badges {
+  display: inline-flex;
+  gap: 0.25rem;
+  align-items: center;
+}
+.unit {
+  color: var(--muted);
+  font-size: 0.85em;
+}
+.badge {
+  font-size: 0.72em;
+  padding: 0.02rem 0.3rem;
+  border-radius: 3px;
+  border: 1px solid var(--border);
+  color: var(--muted);
+  white-space: nowrap;
+}
+.badge.state {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.badge.sparse {
+  border-color: var(--warn);
+  color: var(--warn);
+}
+
+.attachments,
+.meta {
+  padding: 0.7rem;
+  border-top: 1px solid var(--border);
+  margin-top: 0.5rem;
+}
+.attachments header,
+.meta header {
+  font-weight: 600;
+  margin-bottom: 0.3rem;
+}
+.attachments ul {
+  list-style: none;
+  padding: 0;
+  margin: 0;
+}
+.meta dl {
+  margin: 0;
+}
+.meta dl > div {
+  display: flex;
+  gap: 0.4rem;
+  padding: 0.1rem 0;
+}
+.meta dt {
+  color: var(--muted);
+  flex: none;
+  max-width: 45%;
+  overflow-wrap: anywhere;
+}
+.meta dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+/* panes ------------------------------------------------------------------- */
+
+.pane {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  margin-bottom: 0.6rem;
+  background: var(--bg);
+}
+
+.pane-head {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  padding: 0.35rem 0.6rem;
+  border-bottom: 1px solid var(--border);
+}
+.pane-title {
+  font-weight: 600;
+}
+.pane-note {
+  color: var(--muted);
+  font-size: 0.85em;
+  margin-left: auto;
+}
+.gap-note {
+  color: var(--warn);
+}
+
+.close {
+  background: none;
+  border: none;
+  color: var(--muted);
+  font-size: 1.1rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 0 0.2rem;
+}
+.close:hover {
+  color: var(--text);
+}
+
+.plot {
+  padding: 0.3rem;
+}
+
+/* A lane is a uPlot with no y values, so it draws through the same layout as
+   a chart and lines up with one. See layout.ts. */
+.lane {
+  cursor: crosshair;
+  user-select: none;
+}
+
+.err {
+  padding: 0.4rem 0.6rem;
+  color: #c0392b;
+  font-size: 0.9em;
+}
+
+/* uPlot sits on a dark background in dark mode; nudge its defaults. */
+@media (prefers-color-scheme: dark) {
+  .u-legend {
+    color: var(--text);
+  }
+  .u-select {
+    background: rgba(74, 158, 234, 0.25);
+  }
+}
+
+/* indexing screen ---------------------------------------------------------- */
+
+.indexing {
+  max-width: 34rem;
+  margin: 4rem auto;
+  padding: 0 1.5rem;
+}
+.indexing h1 {
+  font-size: 1.2rem;
+  font-weight: 600;
+  margin: 0 0 0.9rem;
+}
+.indexing .bar {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+.indexing .fill {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s linear;
+}
+.indexing p {
+  margin: 0.6rem 0 0;
+}
+
+/* --- record drawer -------------------------------------------------------
+   The records the charts are a summary of, in the same window the charts
+   show. Sized so it never takes more than half the screen: it is for
+   checking a chart against, not for replacing it. */
+
+.drawer {
+  flex: none;
+  max-height: 45vh;
+  display: flex;
+  flex-direction: column;
+  border-top: 1px solid var(--border);
+  background: var(--panel, #fff);
+}
+
+.drawer-head {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.45rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+
+.drawer-head .spacer {
+  flex: 1;
+}
+
+.drawer-head select {
+  font: inherit;
+  padding: 0.1rem 0.3rem;
+}
+
+.drawer-head .export {
+  font-size: 0.8rem;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  color: inherit;
+}
+
+.drawer-head .page {
+  font: inherit;
+  min-width: 1.7rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+
+.drawer-head .page:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+.table-scroll {
+  overflow: auto;
+  flex: 1;
+}
+
+table.records {
+  border-collapse: collapse;
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+table.records th,
+table.records td {
+  padding: 0.15rem 0.6rem;
+  text-align: left;
+  border-bottom: 1px solid var(--border);
+}
+
+table.records th {
+  position: sticky;
+  top: 0;
+  background: var(--panel, #fff);
+  font-weight: 600;
+}
+
+table.records .num {
+  text-align: right;
+}
+
+/* An absent field is not a zero and must not read as one (SPEC §6.2). */
+table.records td.absent {
+  color: var(--muted);
+  text-align: center;
+}
+
+.pad {
+  padding: 1rem;
+}
+
+/* An event field: no y value, but a position and a label. */
+.badge.event {
+  color: #7a4bbd;
+  border-color: #d5c4ee;
+  background: #f5f0fc;
+}
+
+/* A field name that plots every run at once. */
+button.field-name.group {
+  display: block;
+  width: 100%;
+  text-align: left;
+  font: inherit;
+  border: 0;
+  background: none;
+  padding: 0;
+  cursor: pointer;
+  color: inherit;
+}
+button.field-name.group.on {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+/* The upper bound of an overlaid envelope: drawn, but not given its own legend
+   row. The pair is one trace conceptually. */
+.u-legend .lg-hide {
+  display: none;
+}
+
+/* Drawer tabs: two views of the same file at two levels. */
+.drawer-head .tab {
+  font: inherit;
+  font-weight: 600;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  background: none;
+  padding: 0.15rem 0.1rem;
+  cursor: pointer;
+  color: var(--muted);
+}
+.drawer-head .tab.on {
+  color: var(--text);
+  border-bottom-color: var(--accent);
+}
+
+.drawer-tools {
+  display: flex;
+  align-items: center;
+  gap: 0.7rem;
+  padding: 0.4rem 0.7rem;
+  border-bottom: 1px solid var(--border);
+  font-size: 0.85rem;
+}
+.drawer-tools .spacer {
+  flex: 1;
+}
+.drawer-tools select {
+  font: inherit;
+  padding: 0.1rem 0.3rem;
+}
+.drawer-tools .export {
+  font-size: 0.8rem;
+  text-decoration: none;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0.15rem 0.5rem;
+  color: inherit;
+}
+.drawer-tools .page {
+  font: inherit;
+  min-width: 1.7rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  cursor: pointer;
+}
+.drawer-tools .page:disabled {
+  opacity: 0.35;
+  cursor: default;
+}
+
+/* --- frame map -----------------------------------------------------------
+   The file drawn to scale. Frames sit on top of their segment's extent, so
+   the visible gaps are the framing itself: header, schemas, runs, metadata. */
+
+.fm-summary {
+  padding: 0.5rem 0.7rem 0.2rem;
+  font-size: 0.8rem;
+}
+
+.fm-strip {
+  position: relative;
+  height: 34px;
+  margin: 0.2rem 0.7rem 0.5rem;
+  background: var(--border);
+  border-radius: 3px;
+  overflow: hidden;
+}
+.fm-seg {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: repeating-linear-gradient(
+    90deg,
+    rgba(0, 0, 0, 0.05) 0 6px,
+    transparent 6px 12px
+  );
+  border-left: 1px solid var(--muted);
+}
+.fm-frame {
+  position: absolute;
+  top: 8px;
+  bottom: 8px;
+  min-width: 1px;
+}
+/* Dimmed rather than hidden: a highlighted stream still has to be read against
+   where everything else sits. */
+.fm-frame.dim {
+  opacity: 0.15;
+}
+
+.fm-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.5rem;
+  padding: 0 0.7rem 0.5rem;
+}
+.fm-key {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font: inherit;
+  font-size: 0.8rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  background: none;
+  padding: 0.1rem 0.45rem;
+  cursor: pointer;
+  color: inherit;
+}
+.fm-key.on {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+.swatch {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  border-radius: 2px;
+  margin-right: 0.35rem;
+  vertical-align: baseline;
+}

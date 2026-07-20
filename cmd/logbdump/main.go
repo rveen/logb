@@ -20,6 +20,7 @@ package main
 import (
 	"bytes"
 	"encoding/hex"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -165,6 +166,13 @@ func printSchema(w io.Writer, s *logb.Schema) {
 		}
 		fmt.Fprintf(w, "    %-16s %6s %6s  %-8v %-9s %-6s %s\n",
 			f.Name, bit, width, f.Type, order, f.Unit, convDesc(f.Conv))
+		if f.Guarded && int(f.GuardField) < len(s.Fields) {
+			fmt.Fprintf(w, "      guard %s == %d\n",
+				s.Fields[f.GuardField].Name, f.GuardValue)
+		}
+		for _, k := range sortedKeys(f.Meta) {
+			fmt.Fprintf(w, "      meta %s=%s\n", k, f.Meta[k])
+		}
 	}
 	fmt.Fprintln(w)
 }
@@ -188,6 +196,12 @@ func printBatch(w io.Writer, b *logb.Batch) {
 				continue
 			}
 			v, err := b.Value(i, f)
+			if errors.Is(err, logb.ErrFieldAbsent) {
+				// Not a failure: this record is a different variant. Printing
+				// the error would bury the live fields in noise, and printing a
+				// value would be the bug guards exist to prevent.
+				continue
+			}
 			if err != nil {
 				fmt.Fprintf(&sb, "%s=<%v> ", fd.Name, err)
 				continue

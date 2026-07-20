@@ -196,6 +196,22 @@ var (
 	// garbage that looks like data.
 	ErrUnknownFilter = errors.New("logb: unknown filter")
 
+	// ErrFieldAbsent reports that a guarded field's guard was not satisfied for
+	// this record, so the field is not present in it (§6.2). It is a fact about
+	// the record, not a fault: a caller walking a tagged union expects it on
+	// every variant but the live one, and should test for it with errors.Is
+	// rather than treating it as a decode failure.
+	//
+	// Absent is not zero. Nothing in this package will hand back the bits that
+	// happen to lie under an unsatisfied guard.
+	ErrFieldAbsent = errors.New("logb: field is absent from this record (guard not satisfied)")
+
+	// ErrBadGuard reports a guard a schema cannot honour: a guard field that
+	// does not exist, is the guarded field itself, is not an exact-bits numeric
+	// type, is variable-length, or is itself guarded. Guards do not chain (§6.2).
+	// Schema-fatal, and knowable before any record is read.
+	ErrBadGuard = errors.New("logb: invalid field guard")
+
 	// ErrTickTooFine reports that a stream's tick is finer than a nanosecond and
 	// so cannot be carried by time.Duration, which is int64 nanoseconds.
 	ErrTickTooFine = errors.New("logb: axis_exp finer than nanoseconds; time.Duration cannot represent it")
@@ -292,6 +308,20 @@ type Field struct {
 	Unit      string
 	Desc      string
 	Conv      Conversion
+
+	// Guarded makes the field a variant: it is present in a record only when
+	// field GuardField of that record holds the raw value GuardValue. Overlap
+	// alone says these bits have several readings; this says which one is live.
+	// An unsatisfied guard means absent, which is not the same as zero.
+	Guarded    bool
+	GuardField uint16
+	GuardValue uint64
+
+	// Meta is everything about the field that is neither a unit nor prose: a
+	// SPICE variable's type column, the encoding of a serialised payload in a
+	// bytes field. Unit and Desc have their own slots because every consumer
+	// wants them and neither should cost a key lookup.
+	Meta map[string]string
 }
 
 // Schema defines a stream: its record layout, its axis, and its identity.
@@ -392,6 +422,34 @@ func (s *Schema) Validate() error {
 		if blob && f.Conv != nil {
 			if _, isIdentity := f.Conv.(Identity); !isIdentity {
 				return fmt.Errorf("%w: field %q is %v with a %T conversion", ErrConvOnBlob, f.Name, f.Type, f.Conv)
+			}
+		}
+
+		// §6.2: a guard must be resolvable from the schema alone, in one step.
+		// Every check here is decidable before any record arrives, which is why
+		// a bad guard is schema-fatal rather than a per-record failure.
+		if f.Guarded {
+			if int(f.GuardField) >= len(s.Fields) {
+				return fmt.Errorf("%w: field %q guards on field %d, which does not exist",
+					ErrBadGuard, f.Name, f.GuardField)
+			}
+			if int(f.GuardField) == i {
+				return fmt.Errorf("%w: field %q guards on itself", ErrBadGuard, f.Name)
+			}
+			g := &s.Fields[f.GuardField]
+			switch g.Type {
+			case TypeUint, TypeSint, TypeBool:
+			default:
+				return fmt.Errorf("%w: field %q guards on %q, which is %v; a guard needs exact raw bits",
+					ErrBadGuard, f.Name, g.Name, g.Type)
+			}
+			if g.Variable {
+				return fmt.Errorf("%w: field %q guards on %q, which is variable-length",
+					ErrBadGuard, f.Name, g.Name)
+			}
+			if g.Guarded {
+				return fmt.Errorf("%w: field %q guards on %q, which is itself guarded; guards do not chain",
+					ErrBadGuard, f.Name, g.Name)
 			}
 		}
 	}

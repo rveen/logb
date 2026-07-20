@@ -163,10 +163,20 @@ func (w *Writer) writeSchema(s *Schema) error {
 		if f.Variable {
 			flags |= 1
 		}
+		if f.Guarded {
+			flags |= 2
+		}
 		e.u8(flags)
 		e.str(f.Unit)
 		e.str(f.Desc)
 		e.conv(f.Conv)
+		// Present only when guarded: an unguarded field pays nothing for a
+		// feature it does not use, and every schema is restated per segment.
+		if f.Guarded {
+			e.u16(f.GuardField)
+			e.u64(f.GuardValue)
+		}
+		e.kv(f.Meta)
 	}
 	e.kv(s.Meta)
 	return w.frame(FrameSchema, s.id, e.b)

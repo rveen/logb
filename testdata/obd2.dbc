@@ -1,0 +1,33 @@
+VERSION "OBD2 subset for logb's tests — see testdata/obd2.dbc.md"
+
+NS_ :
+
+BS_:
+
+BU_: Tester ECU
+
+BO_ 2015 OBD2_Request: 8 Tester
+ SG_ Length : 0|8@1+ (1,0) [0|8] "bytes"  ECU
+ SG_ Service : 8|8@1+ (1,0) [0|255] ""  ECU
+ SG_ PID : 16|8@1+ (1,0) [0|255] ""  ECU
+
+BO_ 2024 OBD2_Response: 8 ECU
+ SG_ Length : 0|8@1+ (1,0) [0|8] "bytes"  Tester
+ SG_ Service : 8|8@1+ (1,0) [0|255] ""  Tester
+ SG_ PID M : 16|8@1+ (1,0) [0|255] ""  Tester
+ SG_ EngineLoad m4 : 24|8@1+ (0.39215686,0) [0|100] "%"  Tester
+ SG_ CoolantTemp m5 : 24|8@1+ (1,-40) [-40|215] "degC"  Tester
+ SG_ IntakePressure m11 : 24|8@1+ (1,0) [0|255] "kPa"  Tester
+ SG_ EngineSpeed m12 : 31|16@0+ (0.25,0) [0|16383.75] "rpm"  Tester
+ SG_ VehicleSpeed m13 : 24|8@1+ (1,0) [0|255] "km/h"  Tester
+ SG_ IntakeAirTemp m15 : 24|8@1+ (1,-40) [-40|215] "degC"  Tester
+ SG_ MassAirFlow m16 : 31|16@0+ (0.01,0) [0|655.35] "g/s"  Tester
+ SG_ ThrottlePosition m17 : 24|8@1+ (0.39215686,0) [0|100] "%"  Tester
+ SG_ RunTime m31 : 31|16@0+ (1,0) [0|65535] "s"  Tester
+
+CM_ BO_ 2024 "Mode 01 response, ISO 15765-4 11-bit. The PID byte selects which signal the remaining bytes carry.";
+CM_ SG_ 2024 EngineSpeed "PID 0x0C: ((256*A)+B)/4 rpm. Big-endian across bytes 3 and 4 — the Motorola case CAN.md is about.";
+CM_ SG_ 2024 PID "The multiplexor. Becomes a SPEC.md 6.2 guard field: every signal below is present only in frames whose PID selects it.";
+
+VAL_ 2024 Service 65 "Mode01Response" ;
+VAL_ 2015 Service 1 "Mode01Request" ;

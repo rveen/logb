@@ -975,6 +975,42 @@ does — column-major rewriting of a row-major file — except that LTspice make
 whole-file mode you opt into at write time, whereas here it is per-frame and
 invisible to the reader.
 
+### 8.1 Batch sizing
+
+A frame is not a streaming container. Its `payload_len` sits in the header (§3.2)
+and its `crc32c` in the tail, so the payload must exist in full before the first
+byte reaches the file — and if `codec` is set, the length is not even knowable
+until the batch has been compressed. A writer therefore accumulates records in
+memory and emits a whole DATA frame at once. **Batching is not an optimisation
+here; it is the unit in which the format is written.**
+
+This is what keeps a writer on plain `io.Writer`. The alternative — reserve the
+length, stream the records, seek back and patch — demands a seekable sink, which
+rules out a pipe, a socket, and a file being tailed. It also breaks rule 2: a
+file truncated mid-frame would carry a *stale* length pointing into whatever
+followed, where an unpatched one simply runs past end-of-file and stops the read
+where it should stop.
+
+**How big a batch is, is writer policy, and the spec fixes no bound.** The trade
+is:
+
+- **Larger batches** amortise the 12 bytes of frame overhead, give the codec and
+  `filter=transpose` more to work with, and shorten the index.
+- **Smaller batches** bound writer memory, shorten the window in which a power cut
+  loses data, and lower the latency at which a concurrent reader sees records.
+
+Two things this does *not* trade against. Memory scales with batch size, not with
+session length: an eight-hour log holds no more in flight than an eight-second
+one. And a crash costs at most the batch in flight — every earlier frame is
+already complete, CRC'd, and readable (§1, rule 2).
+
+As a starting point, a batch of a few thousand records or a few hundred
+kilobytes, whichever comes first, with a time budget — a second, say — to flush a
+partial batch on a slow stream so that a quiet channel is not held hostage by a
+batch that will not fill. A logger that must survive power loss with sub-second
+granularity shortens the time budget and pays the overhead; that is the knob, and
+it is the writer's to turn.
+
 ## 9. INDEX frame
 
 Written at clean close. Grouped by `stream_uuid`, not `stream_id` — a
@@ -1185,3 +1221,144 @@ without being designed for.
    It was settled with an executable oracle rather than with real DBC files, which
    turned out to be the stronger test: agreement with Vector's reference algorithm
    across 465,600 cases. The conformance vectors in §6.2 are what keep it settled.
+
+## 13. Future: signal dictionaries on raw bus streams
+
+**Not part of v0.1. Nothing here is normative and no frame id is claimed.** This
+section records a design that is believed to work, so that the decision to take it
+or drop it is made against something concrete rather than re-derived later.
+
+### 13.1 The hole it would close
+
+§6.9 draws the self-description line honestly: a file alone locates every field
+and converts it, but it does not explain what an application meant. A raw CAN
+stream sits worse than that. It does not merely lack *meaning* — without the DBC
+it lacks *location*, because a `bytes` payload (§6.3) says only that eight bytes
+were on the wire. The answer §6.2 gives today is the `can0.raw` plus `EngineData`
+pattern: a logger that can decode writes both streams.
+
+That answer is right and it is expensive. A decoded stream roughly doubles the
+volume of the one thing a bus logger writes most of, and a logger that cannot
+afford the second stream is back to shipping a DBC beside the file — the external
+schema dependency rule 4 exists to forbid.
+
+The alternative is to describe the signals *in the schema of the raw stream* and
+decode them in the reader, writing no second stream and keeping the payload bytes
+exactly as they arrived (rule 5).
+
+### 13.2 A DBC is a tagged union, and this format already has those
+
+No new decoding model is needed. Guarded fields (§6.2) say *this field is present
+only when field X of this record holds value V*, which is what a CAN bus is: the
+discriminator is `id`, it is an ordinary field in the record, and each message's
+signals are fields guarded on it, overlapping the payload bytes. Overlap and
+unaligned bit slices are already legal, and big-endian numbering is already
+Motorola (§6.2, CAN.md).
+
+```
+field 0  axis         uint 64
+field 1  id           uint 32                          <- discriminator
+field 2  dlc          uint 8
+field 3  payload      bytes 64 bits                    <- verbatim, rule 5
+field 4  EngineData.EngineSpeed  uint 16 little  "rpm" guard field 1 == 0x100
+field 5  EngineData.Odometer     uint 24 big     "km"  guard field 1 == 0x100
+field 6  ABSData.WheelSpeedFL    uint 12 big   "km/h"  guard field 1 == 0x200
+...
+```
+
+This does not cross the line §6.9 draws. That section refuses payloads whose
+layout depends on their own content in an unbounded way — nested structs, dynamic
+arrays, a type system. CAN is not that. It is a flat union whose discriminator is
+itself a fixed field, so `bit_offset` plus `bit_width` remains computable from the
+schema without consulting the data, which is the entire test §6.9 applies. CAN
+sits on the expressible side of that line; v0.1 simply does not take the win.
+
+Reader cost is small. Guard evaluation exists already; the addition is a
+`discriminator value -> field list` map built once when the schema is parsed, so a
+record costs one lookup rather than a scan over two thousand guards.
+
+### 13.3 What would have to change
+
+Three things, and only the third is interesting.
+
+1. **Multiplexing needs more than one guard.** A multiplexed DBC signal is live
+   when `id == 0x100` *and* `mux == 3`, and a field carries one `guard_field` /
+   `guard_value` pair. The cheap fix is to let a guard field be *itself* guarded
+   and resolve recursively: the mux selector is a field guarded on the id, and the
+   mux'd signal is a field guarded on the selector. No new slots, no new frame,
+   and it generalises past CAN. It needs a cycle check in schema validation, which
+   is already where `ErrBadGuard` lives. The alternative — N guard pairs ANDed —
+   costs more bytes and says less.
+
+2. **J1939 needs a mask.** A PGN is matched while ignoring the source address, and
+   equality cannot express that. An optional `guard_mask` (u64, compare
+   `raw & mask == value`) closes it for eight bytes. The CAN id would also need a
+   stated canonical encoding, so that an 11-bit `0x100` and a 29-bit `0x100` are
+   distinct values — IDE in bit 31 is the obvious choice.
+
+3. **Restatement economics, which is the real design problem.** A production DBC
+   is on the order of a hundred messages and two thousand signals; as fields that
+   is a schema in the low hundreds of kilobytes. Schema restatement per segment is
+   what buys resynchronisation (§3, §4), and restating a 150 KB dictionary every
+   few seconds to keep mid-file entry cheap is a bad trade for exactly the logger
+   this format is built around.
+
+The way out is to split the *cadence*, not the model. The raw stream's SCHEMA
+stays small — axis, id, dlc, payload — so framing recovery stays as cheap as it is
+now, and the signal dictionary travels in a separate frame naming the
+`stream_uuid` it applies to plus the guarded fields it overlays. It is restated
+once per file, or per segment at a low rate, because losing it costs signal
+*names* and not the ability to decode frames. A reader that does not know the
+frame skips it (§3.3, §4.2) and still reads the bus, which is the property that
+makes the extension safe to add later rather than urgent to add now.
+
+Open within the idea: whether the dictionary overlays the stream it rides in or is
+addressed at another stream by uuid. Same-stream is simpler and keeps guards
+local; cross-stream lets one dictionary serve several buses, at the price of a
+reference a reader must resolve. Same-stream first — a dictionary worth sharing is
+a deduplication problem, not a decoding one.
+
+### 13.4 Costs, stated plainly
+
+- **The writer still needs the DBC.** It cannot emit a dictionary it does not
+  have. This is not a regression: a writer that attaches a DBC today already needs
+  it in hand at write time.
+- **The dictionary is a projection, not a translation.** It carries what decoding
+  requires — offsets, widths, byte order, units, conversions, guards. It drops
+  node and sender topology, cycle times, comments, attributes, signal groups, and
+  every message the log never carried.
+- **Field names go flat.** Two messages may each have a `Speed`, so names need
+  qualifying: `EngineData.Speed`.
+- **CAN FD is fine.** A fixed payload field sized to the maximum plus `dlc`; the
+  guard implies the length and the offsets stay static.
+
+### 13.5 Why the DBC stays attached anyway
+
+The dictionary would change the DBC's *status*, not remove it. Today the ATTACH
+frame (§3.3) is load-bearing — the file's signals cannot be located without it,
+which is the rule 4 problem this section exists to solve. With a dictionary, rule 4
+holds on the dictionary alone, and the attachment becomes archival. It is still
+worth writing, for four reasons:
+
+1. **It is the evidence.** The dictionary is derived, and a derivation can be
+   wrong. An importer bug — an off-by-one in a Motorola offset, a conversion
+   dropped, a mux misread — produces plausible garbage, which CAN.md identifies as
+   this format's designated failure mode. With the source attached, the file can
+   be re-decoded correctly years later; without it, the error is unfalsifiable and
+   permanent.
+2. **Provenance.** *Which* revision of the engineering database produced these
+   offsets is a question audits ask and a question two disagreeing files force.
+   The attachment answers it from the file, which is the same argument §3.3 makes
+   for embedding calibration and netlists rather than referencing them.
+3. **It carries what the projection dropped.** §13.4's list — senders, cycle
+   times, comments, attributes — is not needed to decode and is often needed to
+   *work*. Discarding it at write time is a decision the writer has no standing to
+   make on the reader's behalf.
+4. **The rest of the toolchain speaks DBC.** CANoe, CANalyzer and every bench tool
+   want a database file, not a Logb schema. A file that has to be paired with a
+   DBC sourced elsewhere before it can be replayed has kept its data and lost its
+   usefulness.
+
+This is rule 5 one level up: keep what arrived. The dictionary makes the file
+decode without the DBC; it does not make the DBC worthless, and the few kilobytes
+it costs are paid once per file against a bus log measured in gigabytes.

@@ -388,7 +388,75 @@ r, off, err := logb.Resync(data[7000:])
 go run ./cmd/logbgen -o /tmp/x.logb       # write the example file
 go run ./cmd/logbdump /tmp/x.logb         # frames, schemas, records
 go run ./cmd/logbdump -resync /tmp/x.logb # resynchronise, from the CLI
+
+go run ./cmd/raw2logb testdata/test.raw   # import a SPICE raw file
+go run ./cmd/logbdump testdata/test.logb  # …and read it back
+
+go run ./cmd/mdf2logb testdata/mdf/obd2-trunc.mf4   # import an MDF4 recording
+go run ./cmd/logbdump -n 4 testdata/mdf/obd2-trunc.logb
+
+# …and with a database, the same recording decoded into signals
+go run ./cmd/mdf2logb -dbc testdata/obd2.dbc testdata/mdf/obd2-trunc.mf4
+go run ./cmd/logbdump -n 8 testdata/mdf/obd2-trunc.logb
 ```
+
+`raw2logb` applies the mapping in [SPEC.md §11](SPEC.md): LTspice's binary raw
+file in, Logb out, with the header as metadata, the variable type column as units
+plus field metadata, a sibling `.net` netlist as an attachment, and a `.step`
+sweep's run boundaries made explicit instead of left to be guessed at. The
+importer is the [`spice`](spice/) package.
+
+`mdf2logb` does the same for the other parent. One MDF channel group becomes one
+stream, the master channel becomes the axis, and every other channel becomes a
+field **at the bit offset it already had** — the record is copied as it stands,
+because Logb numbers bits the way MDF does. Conversions become §7 conversions,
+invalidation bits become §6.2 guarded fields, composed CAN channels are taken
+apart into the ID, DLC and payload they describe, and a payload MDF stored out of
+line comes back inline where §6.4 says a bus payload belongs. Unsorted recordings
+are demultiplexed at import, so no reader ever pays for the interleaving again.
+Whatever cannot be carried across — an algebraic conversion, an event block — is
+printed rather than dropped in silence. The importer is the [`mdf`](mdf/) package,
+which reads MDF 4.x itself rather than depending on anything.
+
+**A bus recording contains no signals**, and this is worth being clear about
+because it surprises people: a CAN log is frames — an identifier and eight bytes.
+`EngineSpeed` is not in it and never was. What those bytes mean lives in a **DBC**
+database, so `mdf2logb -dbc` reads one and writes a stream per message beside the
+raw frames, where a signal is a field with a unit, a conversion, and a bit offset:
+
+```
+OBD2_Response  +186.929250s  PID=12  Service="Mode01Response"  EngineSpeed=2368rpm
+OBD2_Response  +186.948900s  PID=13  Service="Mode01Response"  VehicleSpeed=46km/h
+```
+
+The frames stay, and **so does the database**: it is embedded as an attachment,
+with its SHA-256 in the metadata, exactly as `raw2logb` embeds the netlist a
+simulation came from. That is what makes the output self-contained rather than
+nearly so — a decoded signal is an interpretation, the frame bytes are the
+evidence for it, and the DBC is the citation. A file that names every signal but
+not what asserted them sends you back to a database somebody else still has to
+have, which is the situation the source recording was in.
+
+*(To be verified: whether MDF4 defines a convention for attaching a bus database.
+It has attachment blocks and one of the fixtures uses one, so a logger could
+embed a DBC; whether the standard says how, and whether tools look for it, is not
+something this project can check from public sources. See STATUS.md.)*
+
+Two parts of the format do the work here, both of which exist for this. A
+**multiplexed** DBC signal becomes a §6.2 **guarded field**: in the example above
+ten signals share bits 88–103 and `PID` decides which one is live, so a reader
+returns the one the frame carries and reports the other nine *absent* rather than
+decoding all ten into plausible garbage. And a **Motorola** signal is an offset
+transform and nothing else — `EngineSpeed` is `31|16@0+` in the DBC and lands at
+bit 24 of the payload, no walk, no special case for crossing a byte boundary. That
+claim is [CAN.md](CAN.md)'s, and `TestDBCMotorola` checks it against Vector's
+reference algorithm over 465,600 cases. The parser is the [`dbc`](dbc/) package.
+
+Worth knowing on measurement data: `-transpose` groups each record byte together
+before compressing (§8), the same idea MDF spells `DZ zip_type=1`. On
+`testdata/mdf/sample_compressed.mf4` — 100 000 records of a ramp — it is the
+difference between a 767 KB output and a 46 KB one. `mdf2logb` says so when the
+source file used the trick and you did not.
 
 That second one is the quickest way to see the crash-safety claim hold up:
 

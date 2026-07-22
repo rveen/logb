@@ -1,0 +1,73 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 348" width="880" height="348" role="img" aria-label="The two composite terminals: string and kv">
+  <style>
+    .bg   { fill: #ffffff; }
+    .fg   { fill: #1f2328; }
+    .mut  { fill: #656d76; }
+    .cell { fill: #ffffff; stroke: #d0d7de; }
+    .dash { stroke-dasharray: 4 3; }
+    .axis { stroke: #8c959f; fill: none; }
+    .k1   { fill: #0969da; fill-opacity: 0.12; stroke: #0969da; }
+    .k2   { fill: #1a7f37; fill-opacity: 0.12; stroke: #1a7f37; }
+    .k3   { fill: #8250df; fill-opacity: 0.12; stroke: #8250df; }
+    .k4   { fill: #cf222e; fill-opacity: 0.12; stroke: #cf222e; }
+    .k5   { fill: #9a6700; fill-opacity: 0.13; stroke: #9a6700; }
+    .l1   { fill: #0969da; }
+    .l2   { fill: #1a7f37; }
+    .l3   { fill: #8250df; }
+    .l4   { fill: #cf222e; }
+    .l5   { fill: #9a6700; }
+    .s1   { stroke: #0969da; fill: none; }
+    .s4   { stroke: #cf222e; fill: none; }
+    text  { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .t    { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    @media (prefers-color-scheme: dark) {
+      .bg   { fill: #0d1117; }
+      .fg   { fill: #e6edf3; }
+      .mut  { fill: #8b949e; }
+      .cell { fill: #0d1117; stroke: #30363d; }
+      .axis { stroke: #6e7681; }
+      .k1   { fill: #79c0ff; fill-opacity: 0.15; stroke: #79c0ff; }
+      .k2   { fill: #3fb950; fill-opacity: 0.15; stroke: #3fb950; }
+      .k3   { fill: #d2a8ff; fill-opacity: 0.15; stroke: #d2a8ff; }
+      .k4   { fill: #ff7b72; fill-opacity: 0.15; stroke: #ff7b72; }
+      .k5   { fill: #d29922; fill-opacity: 0.16; stroke: #d29922; }
+      .l1   { fill: #79c0ff; }
+      .l2   { fill: #3fb950; }
+      .l3   { fill: #d2a8ff; }
+      .l4   { fill: #ff7b72; }
+      .l5   { fill: #d29922; }
+      .s1   { stroke: #79c0ff; fill: none; }
+      .s4   { stroke: #ff7b72; fill: none; }
+    }
+  </style>
+  <rect class="bg" width="880" height="348"/>
+  <text class="t fg" x="40" y="30" font-size="15" font-weight="600">Composite terminals — these two recur in every payload</text>
+  <text class="t mut" x="40" y="49" font-size="12">Every count in the format is a u32 that immediately precedes what it counts. There are no NUL terminators anywhere.</text>
+  <text class="t fg" x="40" y="89" font-size="12.5" font-weight="600">&lt;string&gt; ::= &lt;u32&gt; &lt;byte&gt;{n}</text>
+  <rect class="cell k1" x="40.0" y="100" width="131.3" height="44" rx="3"/>
+  <text class="fg" x="105.7" y="119.0" font-size="11.5" text-anchor="middle">n</text>
+  <text class="mut" x="105.7" y="133.0" font-size="10" text-anchor="middle">u32</text>
+  <rect class="cell k3 dash" x="173.3" y="100" width="664.7" height="44" rx="3"/>
+  <text class="fg" x="505.7" y="119.0" font-size="11.5" text-anchor="middle">UTF-8 bytes</text>
+  <text class="mut" x="505.7" y="133.0" font-size="10" text-anchor="middle">n bytes, not NUL-terminated</text>
+  <text class="t fg" x="40" y="175" font-size="12.5" font-weight="600">&lt;kv&gt; ::= &lt;u32&gt; &lt;kv-pair&gt;{n}</text>
+  <rect class="cell k1" x="40.0" y="186" width="98.0" height="44" rx="3"/>
+  <text class="fg" x="89.0" y="205.0" font-size="11.5" text-anchor="middle">n</text>
+  <text class="mut" x="89.0" y="219.0" font-size="10" text-anchor="middle">u32</text>
+  <rect class="cell k3" x="140.0" y="186" width="198.0" height="44" rx="3"/>
+  <text class="fg" x="239.0" y="212.0" font-size="11.5" text-anchor="middle">kv-pair</text>
+  <rect class="cell k3" x="340.0" y="186" width="198.0" height="44" rx="3"/>
+  <text class="fg" x="439.0" y="212.0" font-size="11.5" text-anchor="middle">kv-pair</text>
+  <rect class="cell cell dash" x="540.0" y="186" width="98.0" height="44" rx="3"/>
+  <text class="fg" x="589.0" y="212.0" font-size="11.5" text-anchor="middle">...</text>
+  <rect class="cell k3" x="640.0" y="186" width="198.0" height="44" rx="3"/>
+  <text class="fg" x="739.0" y="212.0" font-size="11.5" text-anchor="middle">kv-pair</text>
+  <path class="k3" fill-opacity="0.06" stroke-opacity="0.5" d="M140.0 230 L338.0 230 L840 256.0 L40 256.0 Z"/>
+  <text class="t mut" x="40" y="267" font-size="11.5">&lt;kv-pair&gt; ::= &lt;string&gt; &lt;string&gt;   — keys sorted, so the encoding of a map is deterministic</text>
+  <rect class="cell k3" x="40.0" y="276" width="398.0" height="42" rx="3"/>
+  <text class="fg" x="239.0" y="294.0" font-size="11.5" text-anchor="middle">key</text>
+  <text class="mut" x="239.0" y="308.0" font-size="10" text-anchor="middle">&lt;string&gt;</text>
+  <rect class="cell k3" x="440.0" y="276" width="398.0" height="42" rx="3"/>
+  <text class="fg" x="639.0" y="294.0" font-size="11.5" text-anchor="middle">value</text>
+  <text class="mut" x="639.0" y="308.0" font-size="10" text-anchor="middle">&lt;string&gt;</text>
+</svg>

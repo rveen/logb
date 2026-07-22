@@ -1,6 +1,7 @@
 import { useEffect, useState } from "preact/hooks";
 
 import { axisToDisplay, displayToAxis, exportURL, fetchRecords } from "./api";
+import { decimalsFor, formatTime, timeUnit } from "./axis";
 import type { RecordsData, Stream } from "./types";
 
 interface Props {
@@ -75,6 +76,11 @@ export function RecordTable({ streams, from, to }: Props) {
 
   const a = displayToAxis(from, stream.axisKind, stream.axisExp);
   const b = displayToAxis(to, stream.axisKind, stream.axisExp);
+  // The time column follows the charts: the unit comes from the window, so a
+  // microsecond transient is not a column of identical zeros. One extra digit
+  // past a thousandth of the window, which is finer than any two rows on screen.
+  const tu = timeUnit(to - from);
+  const tdec = decimalsFor((to - from) / 1000 / tu.factor);
   const shown = data?.rows.length ?? 0;
   const first = (data?.offset ?? 0) + 1;
 
@@ -107,7 +113,7 @@ export function RecordTable({ streams, from, to }: Props) {
         <table class="records">
           <thead>
             <tr>
-              <th class="num">{stream.axisKind === "time" ? "time (s)" : stream.axisKind}</th>
+              <th class="num">{stream.axisKind === "time" ? `time (${tu.unit})` : stream.axisKind}</th>
               {stream.runs.length > 1 && <th class="num">run</th>}
               {data?.fields.map((f, i) => {
                 const fd = stream.fields[i];
@@ -124,9 +130,9 @@ export function RecordTable({ streams, from, to }: Props) {
             {data?.rows.map((row, i) => (
               <tr key={i}>
                 <td class="num">
-                  {axisToDisplay(row.x, stream.axisKind, stream.axisExp).toFixed(
-                    stream.axisKind === "time" ? 6 : 3,
-                  )}
+                  {stream.axisKind === "time"
+                    ? formatTime(axisToDisplay(row.x, stream.axisKind, stream.axisExp), tu, tdec)
+                    : axisToDisplay(row.x, stream.axisKind, stream.axisExp).toFixed(3)}
                 </td>
                 {stream.runs.length > 1 && <td class="num">{row.run}</td>}
                 {row.text.map((v, k) => {

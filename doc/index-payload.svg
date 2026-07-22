@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 372" width="880" height="372" role="img" aria-label="The INDEX frame payload">
+  <style>
+    .bg   { fill: #ffffff; }
+    .fg   { fill: #1f2328; }
+    .mut  { fill: #656d76; }
+    .cell { fill: #ffffff; stroke: #d0d7de; }
+    .dash { stroke-dasharray: 4 3; }
+    .axis { stroke: #8c959f; fill: none; }
+    .k1   { fill: #0969da; fill-opacity: 0.12; stroke: #0969da; }
+    .k2   { fill: #1a7f37; fill-opacity: 0.12; stroke: #1a7f37; }
+    .k3   { fill: #8250df; fill-opacity: 0.12; stroke: #8250df; }
+    .k4   { fill: #cf222e; fill-opacity: 0.12; stroke: #cf222e; }
+    .k5   { fill: #9a6700; fill-opacity: 0.13; stroke: #9a6700; }
+    .l1   { fill: #0969da; }
+    .l2   { fill: #1a7f37; }
+    .l3   { fill: #8250df; }
+    .l4   { fill: #cf222e; }
+    .l5   { fill: #9a6700; }
+    .s1   { stroke: #0969da; fill: none; }
+    .s4   { stroke: #cf222e; fill: none; }
+    text  { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .t    { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    @media (prefers-color-scheme: dark) {
+      .bg   { fill: #0d1117; }
+      .fg   { fill: #e6edf3; }
+      .mut  { fill: #8b949e; }
+      .cell { fill: #0d1117; stroke: #30363d; }
+      .axis { stroke: #6e7681; }
+      .k1   { fill: #79c0ff; fill-opacity: 0.15; stroke: #79c0ff; }
+      .k2   { fill: #3fb950; fill-opacity: 0.15; stroke: #3fb950; }
+      .k3   { fill: #d2a8ff; fill-opacity: 0.15; stroke: #d2a8ff; }
+      .k4   { fill: #ff7b72; fill-opacity: 0.15; stroke: #ff7b72; }
+      .k5   { fill: #d29922; fill-opacity: 0.16; stroke: #d29922; }
+      .l1   { fill: #79c0ff; }
+      .l2   { fill: #3fb950; }
+      .l3   { fill: #d2a8ff; }
+      .l4   { fill: #ff7b72; }
+      .l5   { fill: #d29922; }
+      .s1   { stroke: #79c0ff; fill: none; }
+      .s4   { stroke: #ff7b72; fill: none; }
+    }
+  </style>
+  <rect class="bg" width="880" height="372"/>
+  <text class="t fg" x="40" y="30" font-size="15" font-weight="600">INDEX — 0x30 — purely an accelerator</text>
+  <text class="t mut" x="40" y="49" font-size="12">&lt;index-payload&gt; ::= &lt;stream-count&gt; &lt;index-group&gt;{stream_count}</text>
+  <rect class="cell k1" x="40.0" y="78" width="118.5" height="44" rx="3"/>
+  <text class="fg" x="99.3" y="97.0" font-size="11.5" text-anchor="middle">stream_count</text>
+  <text class="mut" x="99.3" y="111.0" font-size="10" text-anchor="middle">u32</text>
+  <rect class="cell k2" x="160.5" y="78" width="195.3" height="44" rx="3"/>
+  <text class="fg" x="258.2" y="104.0" font-size="11.5" text-anchor="middle">index-group</text>
+  <rect class="cell k2" x="357.8" y="78" width="195.3" height="44" rx="3"/>
+  <text class="fg" x="455.4" y="104.0" font-size="11.5" text-anchor="middle">index-group</text>
+  <rect class="cell cell dash" x="555.1" y="78" width="85.7" height="44" rx="3"/>
+  <text class="fg" x="597.9" y="104.0" font-size="11.5" text-anchor="middle">…</text>
+  <rect class="cell k2" x="642.7" y="78" width="195.3" height="44" rx="3"/>
+  <text class="fg" x="740.4" y="104.0" font-size="11.5" text-anchor="middle">index-group</text>
+  <path class="k2" fill-opacity="0.06" stroke-opacity="0.5" d="M160.5 122 L355.8 122 L840 148.0 L40 148.0 Z"/>
+  <text class="t mut" x="40" y="159" font-size="11.5">&lt;index-group&gt; ::= &lt;stream-uuid&gt; &lt;entry-count&gt; &lt;index-entry&gt;{entry_count}</text>
+  <rect class="cell k5" x="40.0" y="168" width="298.0" height="44" rx="3"/>
+  <text class="fg" x="189.0" y="187.0" font-size="11.5" text-anchor="middle">stream_uuid</text>
+  <text class="mut" x="189.0" y="201.0" font-size="10" text-anchor="middle">16 bytes — grouped by uuid, never by stream_id</text>
+  <rect class="cell k1" x="340.0" y="168" width="123.0" height="44" rx="3"/>
+  <text class="fg" x="401.5" y="187.0" font-size="11.5" text-anchor="middle">entry_count</text>
+  <text class="mut" x="401.5" y="201.0" font-size="10" text-anchor="middle">u32</text>
+  <rect class="cell k3" x="465.0" y="168" width="148.0" height="44" rx="3"/>
+  <text class="fg" x="539.0" y="194.0" font-size="11.5" text-anchor="middle">index-entry</text>
+  <rect class="cell cell dash" x="615.0" y="168" width="73.0" height="44" rx="3"/>
+  <text class="fg" x="651.5" y="194.0" font-size="11.5" text-anchor="middle">…</text>
+  <rect class="cell k3" x="690.0" y="168" width="148.0" height="44" rx="3"/>
+  <text class="fg" x="764.0" y="194.0" font-size="11.5" text-anchor="middle">index-entry</text>
+  <path class="k3" fill-opacity="0.06" stroke-opacity="0.5" d="M465.0 212 L613.0 212 L840 238.0 L40 238.0 Z"/>
+  <text class="t mut" x="40" y="249" font-size="11.5">&lt;index-entry&gt; ::= &lt;back-offset&gt; &lt;first-axis&gt; &lt;record-count&gt; &lt;run-id&gt;</text>
+  <rect class="cell k4" x="40.0" y="258" width="318.0" height="46" rx="3"/>
+  <text class="fg" x="199.0" y="278.0" font-size="11.5" text-anchor="middle">back_offset</text>
+  <text class="mut" x="199.0" y="292.0" font-size="10" text-anchor="middle">u64, bytes backwards from this frame’s start</text>
+  <rect class="cell k2" x="360.0" y="258" width="211.3" height="46" rx="3"/>
+  <text class="fg" x="465.7" y="278.0" font-size="11.5" text-anchor="middle">first_axis</text>
+  <text class="mut" x="465.7" y="292.0" font-size="10" text-anchor="middle">i64 or f64, per axis_kind</text>
+  <rect class="cell k1" x="573.3" y="258" width="131.3" height="46" rx="3"/>
+  <text class="fg" x="639.0" y="278.0" font-size="11.5" text-anchor="middle">record_count</text>
+  <text class="mut" x="639.0" y="292.0" font-size="10" text-anchor="middle">u32</text>
+  <rect class="cell k1" x="706.7" y="258" width="131.3" height="46" rx="3"/>
+  <text class="fg" x="772.3" y="278.0" font-size="11.5" text-anchor="middle">run_id</text>
+  <text class="mut" x="772.3" y="292.0" font-size="10" text-anchor="middle">u32</text>
+  <text class="t l4" x="40" y="322" font-size="11.5">The offset is backwards, and that is the whole design: nothing points forward, so an index written at the end of a file</text>
+  <text class="t l4" x="40" y="339" font-size="11.5">references only bytes that already exist. A reader rebuilds the index by scanning and MUST NOT trust it over the frames.</text>
+</svg>

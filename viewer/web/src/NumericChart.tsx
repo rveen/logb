@@ -3,6 +3,7 @@ import uPlot from "uplot";
 import "uplot/dist/uPlot.min.css";
 
 import { axisLabel, axisToDisplay, displayToAxis, fetchSeriesBinary } from "./api";
+import { formatTimeWithUnit, timeAxisLabel, timeTicks } from "./axis";
 import { AXIS_H, AXIS_W, LABEL_W, PADDING, runColor, sharedCursor, xScale } from "./layout";
 import type { Signal } from "./types";
 
@@ -51,8 +52,17 @@ export function NumericChart({ signal, from, to, onRange, onRemove }: Props) {
   useEffect(() => {
     if (!host.current) return;
 
+    // A time axis is drawn in whatever unit its window calls for, so both the
+    // axis title and its tick labels are computed per draw rather than pinned
+    // at build time. Every other axis kind already arrives in its own unit.
+    const time = stream.axisKind === "time";
+    const spanOf = (u: uPlot) => (u.scales.x.max ?? 0) - (u.scales.x.min ?? 0);
+
     const series: uPlot.Series[] = [
-      { label: axisLabel(stream.axisKind, stream.axisUnit) },
+      {
+        label: axisLabel(stream.axisKind, stream.axisUnit),
+        value: time ? (u, v) => (v == null ? "" : formatTimeWithUnit(v, spanOf(u))) : undefined,
+      },
     ];
     const bands: uPlot.Band[] = [];
     runs.forEach((r, i) => {
@@ -90,7 +100,13 @@ export function NumericChart({ signal, from, to, onRange, onRemove }: Props) {
       // does. See layout.ts.
       padding: PADDING,
       axes: [
-        { label: axisLabel(stream.axisKind, stream.axisUnit), size: AXIS_H },
+        time
+          ? {
+              label: (u: uPlot) => timeAxisLabel(spanOf(u)),
+              size: AXIS_H,
+              values: (u: uPlot, splits: number[]) => timeTicks(splits, spanOf(u)),
+            }
+          : { label: axisLabel(stream.axisKind, stream.axisUnit), size: AXIS_H },
         { label: field.unit || field.name, labelSize: LABEL_W, size: AXIS_W },
       ],
       hooks: {

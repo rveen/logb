@@ -1,0 +1,99 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 880 411" width="880" height="411" role="img" aria-label="The SCHEMA frame payload">
+  <style>
+    .bg   { fill: #ffffff; }
+    .fg   { fill: #1f2328; }
+    .mut  { fill: #656d76; }
+    .cell { fill: #ffffff; stroke: #d0d7de; }
+    .dash { stroke-dasharray: 4 3; }
+    .axis { stroke: #8c959f; fill: none; }
+    .k1   { fill: #0969da; fill-opacity: 0.12; stroke: #0969da; }
+    .k2   { fill: #1a7f37; fill-opacity: 0.12; stroke: #1a7f37; }
+    .k3   { fill: #8250df; fill-opacity: 0.12; stroke: #8250df; }
+    .k4   { fill: #cf222e; fill-opacity: 0.12; stroke: #cf222e; }
+    .k5   { fill: #9a6700; fill-opacity: 0.13; stroke: #9a6700; }
+    .l1   { fill: #0969da; }
+    .l2   { fill: #1a7f37; }
+    .l3   { fill: #8250df; }
+    .l4   { fill: #cf222e; }
+    .l5   { fill: #9a6700; }
+    .s1   { stroke: #0969da; fill: none; }
+    .s4   { stroke: #cf222e; fill: none; }
+    text  { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+    .t    { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+    @media (prefers-color-scheme: dark) {
+      .bg   { fill: #0d1117; }
+      .fg   { fill: #e6edf3; }
+      .mut  { fill: #8b949e; }
+      .cell { fill: #0d1117; stroke: #30363d; }
+      .axis { stroke: #6e7681; }
+      .k1   { fill: #79c0ff; fill-opacity: 0.15; stroke: #79c0ff; }
+      .k2   { fill: #3fb950; fill-opacity: 0.15; stroke: #3fb950; }
+      .k3   { fill: #d2a8ff; fill-opacity: 0.15; stroke: #d2a8ff; }
+      .k4   { fill: #ff7b72; fill-opacity: 0.15; stroke: #ff7b72; }
+      .k5   { fill: #d29922; fill-opacity: 0.16; stroke: #d29922; }
+      .l1   { fill: #79c0ff; }
+      .l2   { fill: #3fb950; }
+      .l3   { fill: #d2a8ff; }
+      .l4   { fill: #ff7b72; }
+      .l5   { fill: #d29922; }
+      .s1   { stroke: #79c0ff; fill: none; }
+      .s4   { stroke: #ff7b72; fill: none; }
+    }
+  </style>
+  <rect class="bg" width="880" height="411"/>
+  <text class="t fg" x="40" y="30" font-size="15" font-weight="600">SCHEMA — 0x10 — binds stream_id for the rest of the segment</text>
+  <text class="t mut" x="40" y="49" font-size="12">&lt;schema-payload&gt; ::= &lt;stream-uuid&gt; &lt;stream-name&gt; &lt;record-bits&gt; &lt;axis-kind&gt; &lt;axis-mode&gt; &lt;axis-exp&gt; &lt;reserved8&gt;</text>
+  <text class="t mut" x="40" y="66" font-size="12">                     &lt;axis-unit&gt; &lt;axis-step&gt; &lt;axis-scale&gt; &lt;axis-field&gt; &lt;field-count&gt; &lt;field&gt;{field_count} &lt;kv&gt;</text>
+  <rect class="cell k5" x="40.0" y="107" width="207.5" height="48" rx="3"/>
+  <text class="mut" x="40.0" y="102" font-size="9.5">+0</text>
+  <text class="fg" x="143.8" y="128.0" font-size="11.5" text-anchor="middle">stream_uuid</text>
+  <text class="mut" x="143.8" y="142.0" font-size="10" text-anchor="middle">16 bytes, opaque</text>
+  <rect class="cell k3 dash" x="249.5" y="107" width="159.9" height="48" rx="3"/>
+  <text class="mut" x="249.5" y="102" font-size="9.5">+16</text>
+  <text class="fg" x="329.5" y="128.0" font-size="11.5" text-anchor="middle">stream_name</text>
+  <text class="mut" x="329.5" y="142.0" font-size="10" text-anchor="middle">&lt;string&gt;</text>
+  <rect class="cell k1" x="411.4" y="107" width="150.4" height="48" rx="3"/>
+  <text class="fg" x="486.6" y="128.0" font-size="11.5" text-anchor="middle">record_bits</text>
+  <text class="mut" x="486.6" y="142.0" font-size="10" text-anchor="middle">u32, bit-exact</text>
+  <rect class="cell k2" x="563.8" y="107" width="74.2" height="48" rx="3"/>
+  <text class="fg" x="600.9" y="128.0" font-size="11.5" text-anchor="middle">axis_kind</text>
+  <text class="mut" x="600.9" y="142.0" font-size="10" text-anchor="middle">u8</text>
+  <rect class="cell k2" x="640.0" y="107" width="74.2" height="48" rx="3"/>
+  <text class="fg" x="677.1" y="128.0" font-size="11.5" text-anchor="middle">axis_mode</text>
+  <text class="mut" x="677.1" y="142.0" font-size="10" text-anchor="middle">u8</text>
+  <rect class="cell k2" x="716.2" y="107" width="74.2" height="48" rx="3"/>
+  <text class="fg" x="753.3" y="128.0" font-size="11.5" text-anchor="middle">axis_exp</text>
+  <text class="mut" x="753.3" y="142.0" font-size="10" text-anchor="middle">i8</text>
+  <rect class="cell cell" x="792.4" y="107" width="45.6" height="48" rx="3"/>
+  <text class="fg" x="815.2" y="128.0" font-size="11.5" text-anchor="middle">rsv</text>
+  <text class="mut" x="815.2" y="142.0" font-size="10" text-anchor="middle">u8</text>
+  <rect class="cell k3 dash" x="40.0" y="171" width="118.6" height="48" rx="3"/>
+  <text class="fg" x="99.3" y="192.0" font-size="11.5" text-anchor="middle">axis_unit</text>
+  <text class="mut" x="99.3" y="206.0" font-size="10" text-anchor="middle">&lt;string&gt;</text>
+  <rect class="cell k2" x="160.6" y="171" width="114.6" height="48" rx="3"/>
+  <text class="fg" x="217.9" y="192.0" font-size="11.5" text-anchor="middle">axis_step</text>
+  <text class="mut" x="217.9" y="206.0" font-size="10" text-anchor="middle">i64 ticks or f64</text>
+  <rect class="cell k2" x="277.2" y="171" width="106.5" height="48" rx="3"/>
+  <text class="fg" x="330.5" y="192.0" font-size="11.5" text-anchor="middle">axis_scale</text>
+  <text class="mut" x="330.5" y="206.0" font-size="10" text-anchor="middle">i64 or f64</text>
+  <rect class="cell k2" x="385.7" y="171" width="82.4" height="48" rx="3"/>
+  <text class="fg" x="426.9" y="192.0" font-size="11.5" text-anchor="middle">axis_field</text>
+  <text class="mut" x="426.9" y="206.0" font-size="10" text-anchor="middle">u16</text>
+  <rect class="cell k1" x="470.2" y="171" width="86.4" height="48" rx="3"/>
+  <text class="fg" x="513.4" y="192.0" font-size="11.5" text-anchor="middle">field_count</text>
+  <text class="mut" x="513.4" y="206.0" font-size="10" text-anchor="middle">u16</text>
+  <rect class="cell k4 dash" x="558.6" y="171" width="174.9" height="48" rx="3"/>
+  <text class="fg" x="646.0" y="192.0" font-size="11.5" text-anchor="middle">field × field_count</text>
+  <text class="mut" x="646.0" y="206.0" font-size="10" text-anchor="middle">see below</text>
+  <rect class="cell k3 dash" x="735.5" y="171" width="102.5" height="48" rx="3"/>
+  <text class="fg" x="786.7" y="192.0" font-size="11.5" text-anchor="middle">kv</text>
+  <text class="mut" x="786.7" y="206.0" font-size="10" text-anchor="middle">stream metadata</text>
+  <text class="mut" x="40" y="243" font-size="11">axis_kind: 0 time · 1 frequency · 2 angle · 3 distance · 4 index · 5 other</text>
+  <text class="mut" x="40" y="264" font-size="11">axis_mode: 0 implicit uniform · 1 explicit field · 2 implicit log. axis_step and axis_scale are i64 ticks when axis_kind</text>
+  <text class="mut" x="40" y="281" font-size="11">is time, f64 otherwise — except that a log axis carries its ratio as f64 regardless. axis_scale and axis_field are</text>
+  <text class="mut" x="40" y="298" font-size="11">meaningful in explicit mode only.</text>
+  <text class="mut" x="40" y="319" font-size="11">axis_exp is the time tick exponent: one tick = 10^axis_exp seconds.</text>
+  <text class="t mut" x="40" y="344" font-size="11.5">stream_id (in the frame header) is scoped to the segment and expires at the next SYNC. stream_uuid is the identity that</text>
+  <text class="t mut" x="40" y="361" font-size="11.5">survives segments, files, and concatenation — which is why the index groups by uuid and never by id. Equal uuid implies a</text>
+  <text class="t mut" x="40" y="378" font-size="11.5">byte-identical schema.</text>
+</svg>

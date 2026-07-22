@@ -45,9 +45,143 @@ github.com/rveen/logb/
   internal/example/            the generator, shared by the tool and the test
   cmd/logbgen/                 writes the example file
   cmd/logbdump/                pretty printer
+  spice/raw.go                 SPICE raw reader (LTspice IV ASCII + XVII UTF-16)
+  spice/convert.go             SPICE raw → Logb, the SPEC §11 mapping
+  spice/spice_test.go          6 tests, against testdata/test{,.op}.raw
+  cmd/raw2logb/                the importer as a command
+  mdf/block.go                 MDF4 block layer: DG/CG/CN/CC/AT, DT/DL/DZ/HL
+  mdf/mdf.go                   the model: groups, channels, records, VLSD
+  mdf/sample.go                decoding a channel by MDF's own bit rules
+  mdf/conv.go                  MDF conversions → the seven in §7
+  mdf/convert.go               MDF4 → Logb
+  mdf/{mdf,convert}_test.go    16 tests, against testdata/mdf/*.mf4
+  mdf/bus.go                   CAN bus recording → decoded signal streams
+  cmd/mdf2logb/                the importer as a command
+  dbc/dbc.go                   Vector DBC parser
+  dbc/schema.go                DBC message → Logb schema; multiplexing → guards
+  dbc/dbc_test.go              8 tests
+  testdata/obd2.dbc            an OBD2 database for the CAN fixture
+  internal/tick/               axis tick sizing, shared by both importers
 ```
 
-31 tests, all passing (37 counting subtests).
+The SPICE importer is §11 executed rather than asserted. A transient's time axis
+becomes `axis_kind=time`, `axis_mode=explicit` over an **i64 tick** field (seconds
+in a float field would be truncated by `AxisAt`'s `int64(explicit)`), with
+`axis_exp` chosen as the finest of −15…−3 that keeps the run exact through the
+`float64` that `Batch.Axis` routes the field through. Values are copied verbatim —
+the raw file already stores little-endian f32/f64 in schema order — so only the
+axis is rewritten. LTspice's sign-bit-on-time marker is normalised away with
+`abs()` (the fixture has 18 such points, and is monotonic once they are absolute),
+an operating point becomes `axis_kind=index`, and `compressed`/`fastaccess` are
+refused rather than misread. `.step` boundaries are recovered once, at import,
+from the axis restarting, and written as RUN frames — the heuristic below, run
+exactly once and never again by a reader.
+
+The MDF4 importer is the same exercise against the format Logb is a reaction to,
+and it is the strongest evidence the design has. **The record is copied
+verbatim** and the axis prepended, so every field keeps the bit offset MDF gave
+it — which works only because §6.3's bit numbering *is* MDF's, little-endian
+fields from the low bit up and big-endian ones from the high bit down. The test
+converts all five fixtures and compares every field of every record against what
+this repository's own MDF decoder — written from the standard, not from
+`logb/convert.go` — makes of the original. 100 000 records of one file, 1 619 CAN
+frames of another, both framings including `filter=transpose`: all identical. A
+one-bit error in the offset calculation fails it immediately, which was checked
+by making one.
+
+What the mapping shows about the two formats:
+
+- **Unsorted data groups** (§10) are demultiplexed once, at import. MDF
+  interleaves several groups' records and tags each with an id, and every reader
+  pays for that on every read, forever.
+- **Invalidation bits** become guarded fields (§6.2) with no bytes added: the
+  bits are already in the record, and "the sample is not valid" is what an absent
+  field means.
+- **Variable-length signal data** — how MDF stores a CAN payload — is resolved
+  and inlined as a fixed-width `bytes` field, which is what §6.4 says a bus
+  payload should be. The batch keeps its seekability; the indirection was buying
+  nothing.
+- **Composed channels** are flattened, so `CAN_DataFrame.ID` is a 29-bit field at
+  bit 2 of byte 8 rather than a member of a 14-byte blob.
+- **Conversions**: five of MDF's eleven map onto §7 exactly. `tab` (nearest key)
+  needs its keys moved to the midpoints to become §7's floor lookup — exactly,
+  not just on the keys. **Algebraic gets nothing**, deliberately: it is a text
+  formula the reader is expected to evaluate, and §7 rejects that. A
+  value-to-text table whose default is itself a conversion cannot survive whole,
+  so the numbers win and the names become field metadata. Everything unmapped is
+  reported through `Options.Warn`; nothing is dropped in silence.
+- **Unfinalized files** — a logger stopped mid-write, cycle counts never
+  patched — read fine; the record count comes from walking the data, and a
+  partial trailing record is dropped rather than padded.
+- A **virtual master** becomes an implicit axis, the one case where the converted
+  record is *smaller* than the one it came from.
+
+`axis_exp` stops at nanoseconds here, unlike SPICE: a measurement's timestamps
+come from a clock, and resolving them finer claims precision the instrument did
+not have while costing the axis its `time.Duration`.
+
+**The DBC decoder is what makes a bus recording worth plotting.** An MDF bus log
+contains frames, not signals — `EngineSpeed` is not in the file and never was, it
+is in a database — so `mdf2logb -dbc` writes a stream per message beside the raw
+frames. Two claims of the format are cashed here rather than asserted:
+
+- A **multiplexed** signal becomes a §6.2 guard. In the OBD2 fixture ten signals
+  share bits 88–103 of `OBD2_Response` and `PID` selects which is live; the test
+  checks not only that the selected one decodes correctly but that **the other
+  nine report absent**, which is the difference between this and every tool that
+  returns a number for all ten.
+- A **Motorola** signal is `8*(start/8) + (7 - start%8)` and nothing else, which
+  is CAN.md's central claim. `EngineSpeed` is `31|16@0+` and lands at payload bit
+  24 with no data movement.
+
+`TestDecodedSignals` recomputes six signals over 628 frames straight from the
+OBD2 formulas and compares; the full recording yields 11 517 responses and an
+engine-speed trace running from an 850 rpm idle to 3 586 rpm. Extended
+multiplexing (`SG_MUL_VAL_`, and a multiplexor that is itself multiplexed) is
+**refused**, because Logb's guards do not chain by design and a signal decoded out
+of frames that do not carry it is worse than a missing one.
+
+**The database is embedded with the data it explains** — an ATTACH frame plus
+`source.dbc`, `source.dbc.sha256`, and `dbc.database` on every decoded stream,
+the same move `raw2logb` makes with a netlist. This is the honest answer to the
+one thing about bus recordings that no container solves by being clever:
+
+> A CAN recording is not self-explanatory in *any* format. It holds frames; what
+> they mean lives in a database owned by whoever built the vehicle, and it is not
+> on the wire. The files here do not carry it — `testdata/mdf/obd2-trunc.mf4` has
+> no attachments at all, and the only clue to what the recording is about is the
+> free text `Peugeot208` in an XML header comment. But a Logb file converted
+> *without* `-dbc` is in exactly the same position, so this is not a point the
+> format wins on capability. It wins on convention: decode at import, and carry
+> the database in.
+
+> [!NOTE]
+> **To be verified: what MDF4 says about attaching a bus database.** The claim
+> above is about the files in `testdata/mdf`, not about the standard, and the
+> difference matters. What is established: MDF4 has AT blocks that carry an
+> arbitrary file with a filename and a MIME type — `sample3.mf4` embeds one, and
+> `mdf/mdf.go` reads them — so a logger *could* put a DBC in a recording. What is
+> **not** established, because the ASAM spec is paywalled and this project works
+> only from public sources (README.md:36):
+>
+> - whether the bus-logging part of MDF 4.x defines a **convention** for it — a
+>   reserved MIME type, an expected filename, a link from a CAN channel group to
+>   the AT block that describes it — or whether embedding one is merely possible
+>   and unstandardised;
+> - whether any tool in the ecosystem looks for one;
+> - whether MDF 4.3's associated-standard mechanism (the one SPEC.md §9.1 cites
+>   for GNSS) covers bus descriptions too.
+>
+> Until someone checks this against the standard, "MDF does not carry the
+> database" should be read as *these recordings do not*, which is all the
+> evidence here supports. If a convention does exist, `mdf2logb` should look for
+> the attachment and use it when `-dbc` is absent — that would be a strictly
+> better default than asking the user for a file the recording already has.
+
+`TestDatabaseTravelsWithTheData` checks that the embedded copy is byte-identical
+and still parses, so the file can be re-decoded from itself.
+
+70 tests, all passing (99 counting subtests).
 
 ```sh
 go run ./cmd/logbgen -o /tmp/x.logb       # same bytes every run
@@ -251,9 +385,28 @@ freezable, and — still — uncommitted.
    `f64` even when other variables are `f32`; LTspice stores a marker in the time
    axis's sign bit, requiring `abs()`; `Flags: compressed` is LTspice's own scheme
    and unsupported by that parser.
-4. **Consider an MDF4 importer** — `/files/go/src/golib/formats/mdf/mdf.go` is a working MDF4 reader
-   (1200 lines) and the conversion is lossless in principle, even though no
-   compatibility is owed.
+4. ~~**Consider an MDF4 importer**~~ — done; see `mdf/` above. The reader is this
+   repository's own rather than `/files/go/src/golib/formats/mdf/mdf.go`, which
+   was the starting point for the block layer but is built around per-channel
+   `[]any` samples and drops what an importer needs: `sync_type`, composition,
+   VLSD, attachments, and eight of MDF's eleven conversion types.
+
+   Still open there, in rough order of how much it would matter:
+
+   - **Whether MDF4 defines a convention for attaching a bus database**, and if
+     so, reading it so `-dbc` is only needed when the recording lacks one. See
+     the note above; this is a question about the standard, not the code, and it
+     is the one whose answer would change behaviour rather than add a feature.
+   - **MDF 3.** A different container — two-byte block ids, no `##` magic, a
+     different link layout — so a second parser of comparable size, and there is
+     no v3 file here to check it against.
+   - **Event blocks.** MDF's EV is a timestamped annotation on a recording, and
+     Logb has nowhere to put one. Probably a stream of its own rather than a new
+     frame type, but that is a spec question, not an importer one.
+   - **Channel arrays.** A CA composition is kept as one opaque field today.
+   - **Streaming.** `ReadFile` materialises the whole recording; a gigabyte file
+     needs a gigabyte. Fine for an importer that touches every byte once, wrong
+     for anything else.
 
 ## Things not yet implemented
 

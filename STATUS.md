@@ -1,4 +1,4 @@
-# Logb — status, 2026-07-17
+# Logb — status, 2026-07-22
 
 Handoff notes. Where the work is, what's decided, what's open, what to do next.
 
@@ -28,22 +28,28 @@ must seek back and patch links after the fact. That is why MDF4 readers need
 leaves links pointing into the void. Logb frames are self-delimiting, CRC'd, and
 never point forward. A writer only appends; a reader only scans.
 
-## State: working, tested, uncommitted
+## State: working, committed
 
 ```
 github.com/rveen/logb/
-  SPEC.md        draft spec v0.1, 12 sections
+  SPEC.md        draft spec v0.1, 13 sections
+  BNF.md         the same bytes as a grammar, one diagram per structure
+  CAN.md         DBC/MDF4 bit ordering, and what Logb does instead
+  GNSS.md        scaled integers, the two clocks, raw observables
+  README.md      the case for the format, the comparison, the tool tour
   STATUS.md      this file
+  rationale/     file-header.md, frame.md, sync-frame.md — why each field is there
+  doc/           the SVG figures for BNF.md and CAN.md, and gen.py that draws them
   logb.go        types, constants, AxisVal, Schema, Schema.Validate, CRC
   convert.go     conversions + bit extraction
   wire.go        LE encode/decode helpers, transpose filter
   writer.go      Writer — needs only io.Writer; enforces run contiguity
   reader.go      Reader — needs only io.Reader; Resync(); OnFrame trace hook
-  logb_test.go   23 tests
-  example_test.go              8 tests against the fixture (package logb_test)
+  logb_test.go   28 tests
+  example_test.go              10 tests against the fixture (package logb_test)
   testdata/can-example.logb    15 KB, generated, golden
-  internal/example/            the generator, shared by the tool and the test
-  cmd/logbgen/                 writes the example file
+  internal/example/            the generator: example.go, big.go, sweep.go
+  cmd/logbgen/                 writes the example file; -big and -sweep fixtures
   cmd/logbdump/                pretty printer
   spice/raw.go                 SPICE raw reader (LTspice IV ASCII + XVII UTF-16)
   spice/convert.go             SPICE raw → Logb, the SPEC §11 mapping
@@ -54,14 +60,26 @@ github.com/rveen/logb/
   mdf/sample.go                decoding a channel by MDF's own bit rules
   mdf/conv.go                  MDF conversions → the seven in §7
   mdf/convert.go               MDF4 → Logb
-  mdf/{mdf,convert}_test.go    16 tests, against testdata/mdf/*.mf4
   mdf/bus.go                   CAN bus recording → decoded signal streams
+  mdf/{mdf,convert,bus}_test.go   19 tests, against testdata/mdf/*.mf4
   cmd/mdf2logb/                the importer as a command
   dbc/dbc.go                   Vector DBC parser
   dbc/schema.go                DBC message → Logb schema; multiplexing → guards
-  dbc/dbc_test.go              8 tests
+  dbc/dbc_test.go              7 tests
   testdata/obd2.dbc            an OBD2 database for the CAN fixture
   internal/tick/               axis tick sizing, shared by both importers
+
+  viewer/                      a browser-based viewer — its own module, so the
+                               embedded frontend bundle stays out of the core
+                               module's file set (see viewer/README.md)
+    index/                     frame index, per-frame statistics, random access,
+                               sidecar cache, incremental growth — 23 tests
+    decimate/                  min/max envelopes, run-lengths, event density — 8
+    query/                     tier selection and the decoded-frame LRU — 17
+    server/                    net/http API only, no framework — 19 tests
+    web/                       TypeScript + Preact + uPlot, built with Vite;
+                               dist/ is committed and go:embed'ed
+    cmd/logbview/              the command
 ```
 
 The SPICE importer is §11 executed rather than asserted. A transient's time axis
@@ -371,13 +389,14 @@ that does not exist, and `logb` echoes Go's `math.Logb` (no import conflict — 
 are package-qualified — but it owns the search results).
 
 **With this, every question in `SPEC.md` §12 is closed.** The draft is nameable,
-freezable, and — still — uncommitted.
+freezable, and committed.
 
 ## Next steps
 
-1. **Commit the tree.** It is untracked.
+1. ~~**Commit the tree.**~~ — done.
 2. **Settle open question 9** against real DBC files.
-3. **Write the ngspice importer** — `SPEC.md` §11 is a complete mapping table from
+3. ~~**Write the ngspice importer**~~ — done; see `spice/` and `cmd/raw2logb`
+   above. `SPEC.md` §11 is a complete mapping table from
    SPICE `.raw` to Logb. The existing parser at
    `/files/go/src/github.com/rveen/ltspice/ltspice.go` reads LTspice IV (ASCII
    header) and XVII (UTF-16LE header) and is the place to start. Known quirks,
@@ -417,3 +436,11 @@ freezable, and — still — uncommitted.
   §8's defined behaviour rather than a gap in it.
 - `cmd/logbdump` has no golden test of its own output. The fixture pins the
   bytes; nothing pins the rendering.
+- **`go test ./...` does not pass.** The `mdf` and `spice` tests name fixtures
+  that are not in the repository — `mdf/{mdf,convert,bus}_test.go` ask for
+  `sample2.mf4`, `sample3.mf4`, `Discrete_deflate.mf4` and `obd2-trunc.mf4`,
+  and `spice/spice_test.go` asks for `testdata/test.op.raw`. What is committed is
+  `ex1`, `ex2-obd`, `ex3`, `ex5` and `ex6-compressed`, which is also what
+  `testdata/mdf/README.md` documents; the fixtures were renamed and the tests
+  were not. The `logb` and `dbc` packages are green. This contradicts the claim
+  in that README that the suite is self-contained, and is the first thing to fix.

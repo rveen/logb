@@ -467,9 +467,12 @@ go run ./cmd/logbdump /tmp/cut.logb       # 302 records, TRUNCATED
 
 ## Documentation
 
-- [SPEC.md](SPEC.md) — the format, 12 sections, with conformance vectors
+- [SPEC.md](SPEC.md) — the format, 13 sections, with conformance vectors
+- [BNF.md](BNF.md) — the same bytes as a grammar, one diagram per structure
 - [CAN.md](CAN.md) — what Logb fixes about DBC/MDF4 bit ordering, with diagrams
 - [GNSS.md](GNSS.md) — storing GNSS: scaled integers, the two clocks, and raw observables
+- [rationale/](rationale/) — why each field is there, what was rejected, what it cost
+- [viewer/](viewer/) — `logbview`, a browser-based viewer for `.logb` files
 - [STATUS.md](STATUS.md) — implementation state and the design decisions
 - [pkg.go.dev](https://pkg.go.dev/github.com/rveen/logb) — API reference
 

@@ -1,9 +1,12 @@
 // Command logbview opens a Logb file in a browser.
 //
 //	logbview file.logb
+//	logbview -follow file.logb    a recording still being written
 //
 // It indexes the file, starts a local HTTP server, and opens the default
-// browser at it. The server binds the loopback interface only: this reads a
+// browser at it. With -follow it keeps up with a file that is still growing,
+// which is what makes it a live view of a recording in progress rather than a
+// reader of finished ones. The server binds the loopback interface only: this reads a
 // file off the user's disk and serves its contents, and nothing about running
 // a viewer implies consent to publish that on the network. Pass -addr to
 // override deliberately.
@@ -36,6 +39,8 @@ func main() {
 	open := flag.Bool("open", true, "open the default browser")
 	cacheMB := flag.Int("cache", 128, "decoded-frame cache budget, in MiB")
 	noCache := flag.Bool("nocache", false, "ignore and do not write the sidecar index")
+	follow := flag.Bool("follow", false, "keep up with a file that is still being written")
+	every := flag.Duration("follow-every", time.Second, "how often -follow looks for growth")
 	flag.Usage = func() {
 		fmt.Fprintf(os.Stderr, "usage: logbview [flags] file.logb\n\n")
 		flag.PrintDefaults()
@@ -97,6 +102,10 @@ func main() {
 
 		report(f, time.Since(start))
 		state.Ready(f, q)
+
+		if *follow {
+			followFile(path, f, q, acc, state, *every, *cacheMB, *noCache)
+		}
 	}()
 
 	if *open {
@@ -111,6 +120,69 @@ func main() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	log.Fatal(srv.Serve(ln))
+}
+
+// followFile keeps the served model up to date while the file grows.
+//
+// Nothing here is a new mechanism. A Logb file never points forward and every
+// segment restates its schemas, so an indexed prefix stays valid however much
+// is appended after it: index.Open resumes from the last segment boundary and
+// merges only the new tail. What that costs is proportional to what arrived,
+// not to the file, which is what makes following a long recording practical.
+//
+// The size check is what keeps this cheap when nothing is happening. It is not
+// a correctness test — a writer can rewrite within a segment it has not closed
+// — but a file that has not grown at all has nothing to merge.
+//
+// A re-index that fails is not fatal and does not replace the model. A
+// recording is flushed periodically rather than atomically, so reading one
+// mid-flush and finding a partial frame is the ordinary case, not damage; the
+// next pass sees the whole frame. The served model simply stays where it was.
+func followFile(path string, f *index.File, q *query.Query, acc *index.Accessor,
+	state *server.State, every time.Duration, cacheMB int, noCache bool) {
+
+	size := f.Size
+	stale := 0
+	for {
+		time.Sleep(every)
+
+		st, err := os.Stat(path)
+		if err != nil {
+			// The file went away. Keep serving what was already indexed.
+			continue
+		}
+		if st.Size() == size {
+			continue
+		}
+
+		next, err := index.OpenWith(path, index.Options{NoCache: noCache})
+		if err != nil {
+			stale++
+			if stale%10 == 1 {
+				log.Printf("following %s: %v", path, err)
+			}
+			continue
+		}
+		nextAcc, err := index.NewAccessor(path, next.Frames)
+		if err != nil {
+			continue
+		}
+		nextQ := query.New(next, nextAcc)
+		if cacheMB > 0 {
+			nextQ.SetCacheBytes(int64(cacheMB) << 20)
+		}
+
+		state.Ready(next, nextQ)
+
+		// The old accessor holds an open file descriptor and is only safe to
+		// close once nothing is serving from it. Requests already in flight
+		// hold the previous query, so this is deferred by a grace period
+		// rather than done immediately.
+		old := acc
+		time.AfterFunc(30*time.Second, func() { old.Close() })
+
+		acc, size, stale = nextAcc, st.Size(), 0
+	}
 }
 
 // progressBar prints a single rewriting line while a scan runs.

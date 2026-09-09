@@ -1,6 +1,7 @@
 package index
 
 import (
+	"fmt"
 	"math"
 	"os"
 	"path/filepath"
@@ -358,4 +359,86 @@ func writeGrowing(f *os.File, segments int) error {
 		}
 	}
 	return w.Close()
+}
+
+// A live writer flushes on a timer, not on frame boundaries, so a reader that
+// arrives mid-flush sees a file ending part-way through a frame. That is the
+// ordinary case for logbview -follow, and it must not poison the cache: the
+// partial frame is not damage, it is a frame that has not finished arriving,
+// and the next pass must pick it up whole.
+func TestSidecarGrowthFromAPartialFrame(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "midflush.logb")
+
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := writeGrowing(f, 6); err != nil {
+		t.Fatal(err)
+	}
+	f.Close()
+
+	long, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	whole, err := OpenWith(path, Options{NoCache: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	// Cut deliberately inside a frame rather than between two, by landing a
+	// few bytes past a segment's SYNC.
+	cut := int(whole.Frames.Segments[3].Sync.Offset) + 5
+	if cut >= len(long) {
+		t.Fatal("the fixture is too small to cut inside a frame")
+	}
+
+	for _, extra := range []int{0, 5, 17} {
+		t.Run(fmt.Sprintf("cut+%d", extra), func(t *testing.T) {
+			at := cut + extra
+			if at >= len(long) {
+				t.Skip("beyond the fixture")
+			}
+			if err := os.WriteFile(path, long[:at], 0o644); err != nil {
+				t.Fatal(err)
+			}
+			for _, p := range SidecarPaths(path) {
+				os.Remove(p)
+			}
+
+			// Index the partial file. It is valid — rule 2 — and holds every
+			// record up to the last intact frame.
+			first, err := Open(path)
+			if err != nil {
+				t.Fatalf("indexing a file cut mid-frame: %v", err)
+			}
+			if first.Closed {
+				t.Error("a file cut mid-frame reported itself as cleanly closed")
+			}
+
+			// Now the rest arrives.
+			if err := os.WriteFile(path, long, 0o644); err != nil {
+				t.Fatal(err)
+			}
+			grown, err := OpenWith(path, Options{
+				OnCacheMiss: func(e error) { t.Logf("cache miss: %v", e) },
+			})
+			if err != nil {
+				t.Fatal(err)
+			}
+			full, err := OpenWith(path, Options{NoCache: true})
+			if err != nil {
+				t.Fatal(err)
+			}
+			// Whether it extended or rebuilt is the cache's business; that it
+			// ends up telling the truth is not.
+			sameModel(t, full, grown)
+			if grown.Records() != 6*growRecordsPerSegment {
+				t.Errorf("after the rest arrived: %d records, want %d",
+					grown.Records(), 6*growRecordsPerSegment)
+			}
+		})
+	}
 }

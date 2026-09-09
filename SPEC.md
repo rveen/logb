@@ -113,6 +113,7 @@ that point (rule 2).
 | 0x11 | META    | either | Key/value metadata |
 | 0x12 | ATTACH  | file   | Embedded file (DBC, calibration, config, netlist) |
 | 0x13 | RUN     | file   | Declares a run: parameter set for a swept/repeated dataset |
+| 0x14 | HOLD    | stream | Restates the value in force for a stream's held fields (§6.10) |
 | 0x20 | DATA    | stream | A batch of records |
 | 0x30 | INDEX   | file   | Offsets for random access |
 | 0x40 | END     | file   | Records that a writer closed cleanly here |
@@ -348,6 +349,40 @@ explicitly regardless, so an importer may keep doing that; the mode is here beca
 adding it after 0.1 freezes would be a breaking change, and the cost of having it
 is one branch in `AxisAt`.
 
+### 5.4 Changing the axis step
+
+`axis_base` is in the DATA frame; `axis_step` is in the SCHEMA frame, and §4 puts
+schema frames only at a segment boundary. So a stream may restart its axis in every
+frame but cannot change its spacing inside a segment.
+
+That is a real case, not a corner: an operator changing a digitiser's timebase
+mid-session changes `dt` for every record after the change. A writer that emits
+those records under the segment's declared `axis_step` produces a stream whose
+computed axis is wrong for all of them, and no reader can tell — the records are
+well-formed, the CRCs pass, and the numbers are plausible. That is the same
+silent-wrong-answer failure this section already refuses for an unknown
+`axis_mode`, one level down.
+
+**A change of `axis_step` MUST open a new segment.** A writer that changes it
+without one is non-conforming; the reference implementation refuses the write with
+`ErrAxisStepChanged` rather than emitting a frame no reader can question.
+
+The cost is a SYNC frame and a schema restatement, which is what §4 already pays
+for at whatever cadence a writer chooses, and §6.1 exempts `axis_step` — and only
+`axis_step` — from the rule that one `stream_uuid` carries one schema, so a
+digitiser stays one stream across a timebase change.
+
+Two alternatives were considered and are worse:
+
+- **Make `axis_step` run-scoped.** It puts axis computation in two places and
+  makes `dt` a property of a run rather than of the stream it belongs to, which it
+  is not: a stream with no runs at all still has a sample interval.
+- **Require `axis_mode = explicit` for anything whose spacing may change.** It
+  works and needs no rule, at 4–8 bytes per sample — several megabytes on a
+  megapoint acquisition, to express a number that changes when someone turns a
+  knob. The zero-bytes-per-record implicit axis is the reason §5's fast path
+  exists.
+
 ## 6. Streams and schema
 
 A **stream** is a named sequence of records sharing one layout — MDF4's channel
@@ -393,6 +428,14 @@ same `stream_uuid` MUST carry an identical schema — a schema change means a ne
 `stream_uuid`. This keeps readers simple and makes "the schema changed halfway
 through" impossible to express, which is a feature.
 
+**`axis_step` is the one exemption**, and it is deliberate. A stream's sample
+interval may differ from segment to segment under an unchanged `stream_uuid`;
+everything else in the schema may not. See §5.4 for why the alternatives are
+worse. A reader pays nothing for this — schemas are restated per segment and
+re-read there anyway — but a tool that caches a schema by `stream_uuid` across
+segments MUST re-read `axis_step` per segment, and a tool that merges or
+concatenates recordings MUST NOT assume one interval for a `stream_uuid`.
+
 A reader accumulating a stream across segments matches on `stream_uuid`, never on
 `stream_id`. It already reads every SCHEMA frame at every sync point, so this costs
 it nothing.
@@ -407,6 +450,7 @@ it nothing.
      1   byte_order     0=little, 1=big
      1   flags          bit0: variable-length (payload in tail, §6.4)
                     bit1: guarded (present only for some records, below)
+                    bit2: held (written on change; last value stands, §6.10)
      4   unit_len + unit        UTF-8, e.g. "km/h", "" if dimensionless
      4   desc_len + desc
      n   conversion             §7
@@ -888,6 +932,84 @@ That is enough to filter by service, correlate a response to its request, count
 error codes, and find where a service went quiet — none of which needs the
 interface definition. Reassembling segmented messages is a decoder's job, not a
 container's: the logger stores segments as received.
+
+### 6.10 Held fields and the HOLD frame
+
+A field is **held** when its records are written on change rather than on a clock:
+the last value written stands until the next one. A supply setpoint, an instrument
+mode, an operator's annotation of what the rig is doing. Field flags bit 2 says so.
+
+The flag changes nothing about how a record decodes. It says what the *gaps between*
+records mean, which is the one thing a reader cannot infer: in a periodically
+sampled stream a gap means nothing happened and the next sample is imminent, and in
+a held stream it means the value has not moved and the next record may be an hour
+away.
+
+#### The problem it solves
+
+Rule 3 says a reader handed the middle of a file resynchronises and decodes with
+full schema. For a periodically sampled stream that is true and sufficient. For a
+held stream it is true and useless: a reader landing in segment 40 learns that
+`psu1.ch1.v.set` exists and how its bits are laid out, and does not learn that it
+was moved to 12 V thirty-nine segments ago. **Schema is restated per segment; value
+is not.**
+
+This is not a rare case for a live consumer. Every client that attaches to a stream
+in progress is a mid-stream join, and a rack of setpoints is exactly the set of
+held fields.
+
+#### HOLD frame payload
+
+```
++0   8   axis_base      i64 ticks or f64 per axis_kind (§5): where the values were
+                        last written, which is normally before this segment
++8   4   run_id         u32, the run they were written in, 0 if none
++12  4   reserved
++16  m   present[]      ceil(field_count/8) bytes; bit i of byte i/8, from the LSB,
+                        set = field i carries a restated value
++16+m n  record         one record in the stream's layout: the fixed portion, then
+                        its tails (§6.4), exactly as a DATA frame holds one
+```
+
+A HOLD frame is **stream-scoped** and belongs to a segment's preamble: it follows
+the SCHEMA and RUN frames after a SYNC frame, and precedes the segment's first DATA
+frame. It carries at most one frame per stream per segment.
+
+The record is one ordinary record so that a restated value decodes by exactly the
+rules a written one does — guards, conversions, byte order, tails. A restatement
+that decoded by different rules would eventually disagree with the records it
+restates, and the disagreement would be silent.
+
+`present` exists because a held field can have no value yet. A setpoint nobody has
+set is a gap, and writing a zero for it is the same lie §6.2 refuses for a guarded
+field whose guard does not hold. A reader MUST report an absent restated field as
+absent, never as zero. Fields that are not held SHOULD have their bit clear.
+
+`axis_base` is the informative part. It is not the segment's start: it says when the
+value was last actually written, which for a setpoint moved an hour ago is an hour
+before the frame carrying it. A consumer drawing a step trace needs that, or every
+recording looks as though everything was set at the moment the viewer attached.
+
+#### Requirements
+
+- A writer that has a value in force for a held field SHOULD emit a HOLD frame for
+  its stream in every segment it opens thereafter.
+- **A reader MUST NOT return a HOLD frame's record as data.** It is a statement
+  about the past, like an END frame (§3.3), and counting it as a sample adds a
+  spurious point to every held channel at every segment boundary.
+- A HOLD frame naming a stream with no bound schema in this segment MUST be
+  skipped, exactly as an unbound DATA frame is (§8).
+
+#### What it costs, and what it does not
+
+Cost is proportional to channel count and paid once per segment, not per record —
+the trade §6.1 already accepts for stream metadata one level up.
+
+It is a pure addition. `0x14` was unallocated, and §3.3 requires unknown frame types
+to be skipped by `payload_len`, so a reader written before this section reads a file
+containing HOLD frames exactly as it reads any other file: it sees every record,
+loses only the restatement, and reports no error. No version bump is required and
+none is implied.
 
 This section is deliberately the only one of its kind. A standard per protocol is
 how a format ends up with seven of them.

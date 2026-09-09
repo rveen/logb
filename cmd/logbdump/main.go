@@ -101,13 +101,21 @@ func dump(w io.Writer, data []byte, name string) error {
 		r.OnFrame = func(f logb.Frame) {
 			frames[f.Type]++
 			fmt.Fprintf(w, "@%-8d %-7s len=%-6d", f.Offset, f.Type, f.Len)
-			if f.StreamID != 0 || f.Type == logb.FrameSchema || f.Type == logb.FrameData {
+			if f.StreamID != 0 || f.Type == logb.FrameSchema || f.Type == logb.FrameData ||
+				f.Type == logb.FrameHold {
 				fmt.Fprintf(w, " stream=%d", f.StreamID)
 			}
 			fmt.Fprintln(w)
 		}
 	} else {
 		r.OnFrame = func(f logb.Frame) { frames[f.Type]++ }
+	}
+
+	// A HOLD frame is not a record and never reaches Next, so without this the
+	// values a segment opens with would be invisible — which is exactly the gap
+	// the frame exists to close.
+	if !*quiet {
+		r.OnHold = func(h *logb.Hold) { printHold(w, h) }
 	}
 
 	seen := map[string]bool{}
@@ -170,11 +178,41 @@ func printSchema(w io.Writer, s *logb.Schema) {
 			fmt.Fprintf(w, "      guard %s == %d\n",
 				s.Fields[f.GuardField].Name, f.GuardValue)
 		}
+		if f.Hold {
+			fmt.Fprintf(w, "      hold: written on change; the last value stands\n")
+		}
 		for _, k := range sortedKeys(f.Meta) {
 			fmt.Fprintf(w, "      meta %s=%s\n", k, f.Meta[k])
 		}
 	}
 	fmt.Fprintln(w)
+}
+
+// printHold renders a segment's restated values. The axis position is printed
+// because it is the informative part: it says when the value was last written,
+// which is normally before the segment restating it.
+func printHold(w io.Writer, h *logb.Hold) {
+	fmt.Fprintf(w, "  hold %q as of %s", h.Schema.Name, axisStr(h.Schema, h.AxisBase))
+	if h.RunID != 0 {
+		fmt.Fprintf(w, "  run=%d", h.RunID)
+	}
+	fmt.Fprintln(w)
+	for i := range h.Schema.Fields {
+		f := &h.Schema.Fields[i]
+		if !f.Hold {
+			continue
+		}
+		if !h.Has(i) {
+			fmt.Fprintf(w, "    %-16s -\n", f.Name)
+			continue
+		}
+		v, err := h.Value(i)
+		if err != nil {
+			fmt.Fprintf(w, "    %-16s <%v>\n", f.Name, err)
+			continue
+		}
+		fmt.Fprintf(w, "    %-16s %s\n", f.Name, valueStr(v, f))
+	}
 }
 
 func printBatch(w io.Writer, b *logb.Batch) {

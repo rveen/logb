@@ -41,10 +41,14 @@ github.com/rveen/logb/
   rationale/     file-header.md, frame.md, sync-frame.md — why each field is there
   doc/           the SVG figures for BNF.md and CAN.md, and gen.py that draws them
   logb.go        types, constants, AxisVal, Schema, Schema.Validate, CRC
+  column.go      Column: the bulk, typed, unboxed read of one field (§5.3 below)
+  hold.go        Hold: a segment's restated values, and the HOLD frame decoder
   convert.go     conversions + bit extraction
   wire.go        LE encode/decode helpers, transpose filter
   writer.go      Writer — needs only io.Writer; enforces run contiguity
   reader.go      Reader — needs only io.Reader; Resync(); OnFrame trace hook
+  column_test.go 6 tests, plus the Column-vs-boxed benchmark
+  hold_test.go   8 tests: HOLD, and the axis_step segment rule
   logb_test.go   28 tests
   example_test.go              10 tests against the fixture (package logb_test)
   testdata/can-example.logb    15 KB, generated, golden
@@ -199,7 +203,9 @@ one thing about bus recordings that no container solves by being clever:
 `TestDatabaseTravelsWithTheData` checks that the embedded copy is byte-identical
 and still parses, so the file can be re-decoded from itself.
 
-70 tests, all passing (99 counting subtests).
+Everything green is green: 52 tests in the core package (66 counting subtests),
+7 in `dbc`, and 67 across the four viewer packages. `mdf` and `spice` still fail
+on renamed fixtures — see the last item under "Things not yet implemented".
 
 ```sh
 go run ./cmd/logbgen -o /tmp/x.logb       # same bytes every run
@@ -246,6 +252,74 @@ go vet ./... && gofmt -l .
 **Not yet committed — `git status` shows the whole tree untracked.** Commit before
 switching machines; nothing here exists anywhere else.
 
+## Added for the instrument-rack use case, 2026-09-09
+
+Three changes, driven by a design study for a bus-plus-bench test daemon that
+writes Logb live (`../ktest/doc/test-software-outline.md`). Each was checked
+against this implementation before it was written down, and none is a redesign.
+
+**1. `Column` — the bulk, typed read (`column.go`).** `Raw` and `Value` box every
+value into an `any`, which is the right shape for a CAN signal and the wrong one
+for a waveform: a one-megapoint acquisition cost a million interface conversions.
+`Column[T](b, f, dst)` is a bounds check and a strided copy into a typed slice,
+with a byte swap where the field's order is not the machine's. Measured on a
+megapoint batch: **2.0 ms against 25.9 ms**, 1066 MB/s against 81.
+
+It refuses rather than converts, and the refusals are the design. A guarded field
+is `ErrColumnGuarded`, because a plain slice cannot say "absent" and a zero there
+is the exact lie §6.2 exists to prevent. A field that is not byte-aligned and
+byte-sized — a 12-bit signal, say — is `ErrColumnShape`. A slice whose element
+type is not the field's type and width is `ErrColumnType`, including `[]float64`
+for an `f32` field: silent widening would put back the per-element cost the whole
+thing removes. No format change, no new dependency, and `Batch.Data` was already
+the contiguous de-filtered records it needs.
+
+**2. The HOLD frame, `0x14` (`hold.go`, SPEC §6.10).** Rule 3's promise is only
+half true for a stream written on change. A reader landing mid-file recovers the
+schema of `psu1.ch1.v.set` and not the fact that it was moved to 12 V forty
+minutes ago: schema is restated per segment, value is not. Field flag bit 2 marks
+a held field; a HOLD frame in each segment preamble restates the value in force,
+with a presence bitmap so "never set" stays distinguishable from zero, and an
+`axis_base` saying when it was last written — which is normally before the segment
+carrying it, and is the difference between a step trace that starts where it
+really did and one that starts at the left edge of the chart.
+
+The frame is writer state, not a call: `SetHold` records the value and
+`BeginSegment` emits it into every segment thereafter, because a frame whose whole
+job is to be in every preamble is a frame a caller would forget.
+
+**It cost nothing to add.** `0x14` was unallocated and §3.3 already required
+unknown frame types to be skipped by `payload_len`, so a reader written before it
+existed sees every record and reports no error. `TestHoldIsSkippedByAReaderThatDoesNotKnowIt`
+rewrites the type byte to an unallocated id and checks exactly that. No version
+bump, and the golden fixture is unmoved because bit 2 is clear in every existing
+schema.
+
+**3. `axis_step` MUST open a segment (SPEC §5.4, §6.1).** `axis_base` is in the
+DATA frame and `axis_step` is in the SCHEMA frame, which §4 places only at a
+segment boundary — so a stream can restart its axis per frame but cannot change
+its spacing inside a segment. An operator turning a digitiser's timebase knob does
+exactly that, and a writer that emits the faster records under the old declaration
+produces a well-formed file whose axis is wrong for all of them, with nothing to
+tell a reader. `WriteData` now refuses with `ErrAxisStepChanged`.
+
+The part that is not obvious, and that the study found: **opening a segment was not
+sufficient by itself.** §6.1 required an identical schema across segments under one
+`stream_uuid`, so a timebase change would have minted a new stream identity —
+`scope1.ch1` becoming a different stream every time someone turns a knob, which
+breaks any registry keyed on a stable channel name. §6.1 now exempts `axis_step`,
+and only `axis_step`, from that rule. Cost: a tool that caches schemas by
+`stream_uuid` across segments must re-read the step, and a merge tool must not
+assume one interval per stream. Both are stated in §6.1.
+
+Still open from that study, and deliberately not built here:
+
+- The viewer ignores HOLD frames (its reader leaves `OnHold` nil, so they are
+  skipped). Rendering a held channel as a step trace anchored at the restated
+  value is a viewer change, not a format one.
+- Nothing in this repository writes a stream live. The daemon, the streaming
+  transport and an index that grows as it writes are `ktest`'s work.
+
 ## Decisions made (do not re-litigate without a reason)
 
 | Decision | Why |
@@ -269,6 +343,10 @@ switching machines; nothing here exists anywhere else.
 | No compression dictionaries | Shared across segments contradicts what a segment is; restated per segment is not sharing. A dictionary by id would break rule 4. Bigger batches are the cheaper answer, and a later version can add one as a codec id at no cost |
 | Unknown axis_mode / codec / filter are rejected, never defaulted | The property that makes each of them extensible later. A reader that guesses returns garbage shaped like data |
 | Bit numbering follows the byte order | Each order's fields are contiguous in its own numbering, so the rule has no alignment case and the Motorola sawtooth never appears. BE is exactly DBC |
+| Held fields are a flag, not a stream kind (§6.10) | It says what the gaps between records mean, which is the one thing a reader cannot infer. Everything about decoding a record is unchanged |
+| A HOLD frame restates one ordinary record | A restatement that decoded by different rules than a written value would eventually disagree with it, silently. Reusing the record layout makes that impossible |
+| `axis_step` is exempt from cross-segment schema identity (§6.1) | Otherwise a timebase change mints a new `stream_uuid`, and a channel registry keyed on a stable name loses the channel. The alternatives cost either two places to compute an axis, or 4–8 bytes per sample |
+| `Column` refuses rather than converts | Silent widening restores the per-element cost it exists to remove; a zero for an absent guarded sample is the §6.2 lie |
 | Conformance vectors are normative (§6.2) | Every prose statement of bit numbering ever written has been ambiguous or wrong, including two in this repo's own history. Vectors do not have that failure mode |
 
 ### The motivating example, worth keeping

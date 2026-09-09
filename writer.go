@@ -38,6 +38,24 @@ type Writer struct {
 	// resume in a later segment.
 	curRun  map[[16]byte]uint32
 	pastRun map[[16]byte]map[uint32]bool
+
+	// segStep is the axis_step each stream declared in the current segment's
+	// SCHEMA frame, so a mid-segment change can be caught at the WriteData that
+	// would have been misread. Cleared at every segment boundary.
+	segStep map[[16]byte]AxisVal
+
+	// hold is the current value of each stream's held fields, restated into
+	// every segment this writer opens. It is writer state rather than a frame
+	// the caller emits, because the frame's whole job is to be present in every
+	// segment preamble, and a caller that had to remember it would forget.
+	hold map[[16]byte]*holdState
+}
+
+type holdState struct {
+	base    AxisVal
+	runID   uint32
+	present []bool
+	record  []byte
 }
 
 type indexEntry struct {
@@ -56,6 +74,8 @@ func NewWriter(w io.Writer) (*Writer, error) {
 		index:   map[[16]byte][]indexEntry{},
 		curRun:  map[[16]byte]uint32{},
 		pastRun: map[[16]byte]map[uint32]bool{},
+		segStep: map[[16]byte]AxisVal{},
+		hold:    map[[16]byte]*holdState{},
 	}
 	var e buf
 	e.raw(magic[:])
@@ -120,6 +140,7 @@ func (w *Writer) BeginSegment(wallTimeNs int64) error {
 	// boundary is contiguous in each, which is all §6.5 asks for.
 	clear(w.curRun)
 	clear(w.pastRun)
+	clear(w.segStep)
 
 	for _, s := range w.streams {
 		if err := w.writeSchema(s); err != nil {
@@ -131,10 +152,80 @@ func (w *Writer) BeginSegment(wallTimeNs int64) error {
 			return err
 		}
 	}
+	// After the runs, because a HOLD frame names the run its values were last
+	// written in.
+	for _, s := range w.streams {
+		if h, ok := w.hold[s.UUID]; ok {
+			if err := w.writeHold(s, h); err != nil {
+				return err
+			}
+		}
+	}
 	return nil
 }
 
+// SetHold records the current value of a stream's held fields, to be restated
+// in the preamble of every segment this writer opens from now on.
+//
+// record is one record in the stream's own layout — the same bytes WriteData
+// takes, for a single record, including its tails if the schema has variable
+// fields. present says which fields the record actually carries a value for,
+// and must have one entry per field: a setpoint that has never been set has no
+// value to restate, and a zero there would be a lie rather than a gap.
+//
+// base is where on the axis these values were last written, which may be far
+// before the segment that restates them — that is the point. runID is the run
+// they were written in.
+//
+// Values are restated, not written: SetHold emits nothing on its own and adds
+// no record to the stream. A writer calls it beside the WriteData that carried
+// the change.
+func (w *Writer) SetHold(s *Schema, base AxisVal, runID uint32, present []bool, record []byte) error {
+	if s == nil || len(present) != len(s.Fields) {
+		return ErrBadHold
+	}
+	if len(record) < s.RecordBytes() {
+		return ErrBadHold
+	}
+	w.hold[s.UUID] = &holdState{
+		base:    base,
+		runID:   runID,
+		present: append([]bool(nil), present...),
+		record:  append([]byte(nil), record...),
+	}
+	return nil
+}
+
+// ClearHold drops a stream's held values, so later segments restate nothing for
+// it. A channel that was released, or an instrument that went away.
+func (w *Writer) ClearHold(s *Schema) {
+	if s != nil {
+		delete(w.hold, s.UUID)
+	}
+}
+
+func (w *Writer) writeHold(s *Schema, h *holdState) error {
+	var e buf
+	e.u64(uint64(h.base))
+	e.u32(h.runID)
+	e.u32(0) // reserved
+	bits := make([]byte, (len(s.Fields)+7)/8)
+	for i, p := range h.present {
+		if p {
+			bits[i/8] |= 1 << uint(i%8)
+		}
+	}
+	e.raw(bits)
+	e.raw(h.record)
+	return w.frame(FrameHold, s.id, e.b)
+}
+
 func (w *Writer) writeSchema(s *Schema) error {
+	// What this segment now claims the spacing is. A stream's schema is read
+	// from the caller's own *Schema at every restatement, so changing AxisStep
+	// and opening a segment is how a scope's timebase change is expressed.
+	w.segStep[s.UUID] = s.AxisStep
+
 	var e buf
 	e.raw(s.UUID[:])
 	e.str(s.Name)
@@ -165,6 +256,9 @@ func (w *Writer) writeSchema(s *Schema) error {
 		}
 		if f.Guarded {
 			flags |= 2
+		}
+		if f.Hold {
+			flags |= 4
 		}
 		e.u8(flags)
 		e.str(f.Unit)
@@ -219,6 +313,14 @@ func (w *Writer) WriteData(s *Schema, base AxisVal, runID uint32, recordCount ui
 		if err := w.BeginSegment(0); err != nil {
 			return err
 		}
+	}
+
+	// §5.2: axis_step is schema-scoped, and a schema is only restated at a
+	// segment boundary. Changing it under a segment's declared value would make
+	// every record of this frame decode to a wrong axis position, silently.
+	if step, declared := w.segStep[s.UUID]; declared && step != s.AxisStep {
+		return fmt.Errorf("%w (stream %q, declared %d, now %d)",
+			ErrAxisStepChanged, s.Name, int64(step), int64(s.AxisStep))
 	}
 
 	// §6.5: within a segment, a stream's runs are contiguous. A writer that has

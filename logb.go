@@ -57,9 +57,18 @@ const (
 	FrameMeta   FrameType = 0x11
 	FrameAttach FrameType = 0x12
 	FrameRun    FrameType = 0x13
-	FrameData   FrameType = 0x20
-	FrameIndex  FrameType = 0x30
-	FrameEnd    FrameType = 0x40
+
+	// FrameHold restates the last known value of a stream's held fields. It is
+	// a segment-preamble frame, emitted after the schemas and runs that follow
+	// a SYNC frame, and it is what makes rule 3 true for a stream whose records
+	// are written on change rather than on a clock: schema alone tells a reader
+	// joining mid-stream that a setpoint exists, not that it was moved to 12 V
+	// forty minutes ago.
+	FrameHold FrameType = 0x14
+
+	FrameData  FrameType = 0x20
+	FrameIndex FrameType = 0x30
+	FrameEnd   FrameType = 0x40
 
 	// FrameSign is reserved, not defined in v0.1. A signature over the preceding
 	// segment fits the frame model without breaking rule 1; reserving the id now
@@ -80,6 +89,8 @@ func (t FrameType) String() string {
 		return "ATTACH"
 	case FrameRun:
 		return "RUN"
+	case FrameHold:
+		return "HOLD"
 	case FrameData:
 		return "DATA"
 	case FrameIndex:
@@ -246,6 +257,22 @@ var (
 	// per stream per segment, so a reader can close a run out when the id
 	// changes instead of buffering the whole segment to find out.
 	ErrRunInterleaved = errors.New("logb: run_id reappears after the stream left it; runs must be contiguous within a segment")
+
+	// ErrBadHold means a HOLD frame or a call to SetHold does not describe one
+	// record of the stream it names: a presence vector of the wrong length, or
+	// a record shorter than the schema's fixed portion.
+	ErrBadHold = errors.New("logb: hold does not match its schema")
+
+	// ErrAxisStepChanged means a stream's axis_step was changed without opening
+	// a segment. axis_step lives in the SCHEMA frame and schemas are restated
+	// only at a segment boundary (§4), so a writer that changes the sample
+	// interval mid-segment produces records whose real spacing no longer matches
+	// what the stream declares — and every reader then computes a wrong axis for
+	// them and reports nothing wrong. An operator changing a scope's timebase is
+	// the ordinary way to reach this. Refusing is the same choice §5 already
+	// makes for an unknown axis_mode, one level down: a silent wrong answer is
+	// worse than a loud refusal.
+	ErrAxisStepChanged = errors.New("logb: axis_step changed within a segment; a change of sample interval must open a new segment")
 )
 
 // AxisVal is the eight bytes of an axis quantity. Its interpretation depends on
@@ -316,6 +343,14 @@ type Field struct {
 	Guarded    bool
 	GuardField uint16
 	GuardValue uint64
+
+	// Hold marks a field whose records are written on change: the last value
+	// written stands until the next one. It changes nothing about how a record
+	// decodes — it says what the gaps between records mean, which is the one
+	// thing a reader cannot infer. A reader joining a segment learns the value
+	// in force from the HOLD frame; without the flag, a writer has no way to
+	// say which fields belong in one.
+	Hold bool
 
 	// Meta is everything about the field that is neither a unit nor prose: a
 	// SPICE variable's type column, the encoding of a serialised payload in a

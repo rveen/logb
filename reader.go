@@ -73,6 +73,18 @@ type Reader struct {
 	// A nil OnSchema costs one branch per schema frame.
 	OnSchema func(s *Schema, streamID uint16)
 
+	// OnHold, if set, is called for every HOLD frame, with the values a stream's
+	// held fields carried when the segment opened. Like OnSchema it fires during
+	// Next, and for the same reason: a restatement is not a record and must not
+	// be returned as one — it would double every value in a plot.
+	//
+	// This is what a consumer joining mid-stream reads its opening state from.
+	// A file's first segment normally has none, because nothing has been set
+	// yet; every later segment restates whatever is in force.
+	//
+	// A nil OnHold costs one branch per hold frame.
+	OnHold func(*Hold)
+
 	streams map[uint16]*Schema // segment-scoped; cleared at every sync frame
 	runs    map[uint32]*Run
 	seq     uint64
@@ -381,6 +393,23 @@ func (r *Reader) Next() (*Batch, error) {
 			}
 			return b, nil
 
+		case FrameHold:
+			s, ok := r.streams[streamID]
+			if !ok {
+				// Same as an unbound DATA frame: a stream this reader never saw
+				// a schema for, or one it left unbound on purpose.
+				continue
+			}
+			if r.OnHold == nil {
+				continue
+			}
+			h, err := decodeHold(s, payload)
+			if err != nil {
+				r.Truncated = true
+				return nil, io.EOF
+			}
+			r.OnHold(h)
+
 		case FrameEnd:
 			// An END frame states that a writer closed cleanly at this point. It
 			// is a statement about the past, not a command to stop: it has no
@@ -425,6 +454,7 @@ func (r *Reader) decodeSchema(payload []byte) (*Schema, error) {
 		flags := d.u8()
 		f.Variable = flags&1 != 0
 		f.Guarded = flags&2 != 0
+		f.Hold = flags&4 != 0
 		f.Unit = d.str()
 		f.Desc = d.str()
 		f.Conv = d.conv()

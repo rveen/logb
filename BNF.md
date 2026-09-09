@@ -47,7 +47,8 @@ enforces them.
 ```
 <file>     ::= <file-header> <segment>* [ <index-frame> ] [ <end-frame> ]
 
-<segment>  ::= <sync-frame> <schema-frame>+ <run-frame>* <segment-body>*
+<segment>  ::= <sync-frame> <schema-frame>+ <run-frame>* <hold-frame>*
+               <segment-body>*
 
 <segment-body> ::= <meta-frame> | <attach-frame> | <data-frame>
 ```
@@ -96,6 +97,7 @@ The frame type selects the payload production:
 <meta-frame>   ::= <frame>   (* frame_type = 0x11, payload = <meta-payload>   *)
 <attach-frame> ::= <frame>   (* frame_type = 0x12, payload = <attach-payload> *)
 <run-frame>    ::= <frame>   (* frame_type = 0x13, payload = <run-payload>    *)
+<hold-frame>   ::= <frame>   (* frame_type = 0x14, payload = <hold-payload>   *)
 <data-frame>   ::= <frame>   (* frame_type = 0x20, payload = <data-payload>   *)
 <index-frame>  ::= <frame>   (* frame_type = 0x30, payload = <index-payload>  *)
 <end-frame>    ::= <frame>   (* frame_type = 0x40, payload is empty           *)
@@ -163,7 +165,8 @@ only extension mechanism. A reader that skips one is still conforming, so
 <data-type>   ::= <u8>    (* 0 uint, 1 sint, 2 float, 3 bool,
                              4 bytes, 5 string, 6 complex *)
 <byte-order>  ::= <u8>    (* 0 little, 1 big *)
-<field-flags> ::= <u8>    (* bit0 variable-length (tail), bit1 guarded *)
+<field-flags> ::= <u8>    (* bit0 variable-length (tail), bit1 guarded,
+                             bit2 held *)
 <unit>        ::= <string>
 <desc>        ::= <string>
 <guard-field> ::= <u16>   (* index into fields of this schema *)
@@ -238,6 +241,28 @@ metadata live inline in the SCHEMA frame as `<kv>` instead.
 ```
 
 The `<kv>` is the run's parameter set: `"R1"="1.0e3"`, `"temp"="27"`.
+
+## HOLD — 0x14
+
+```
+<hold-payload> ::= <axis-base> <run-id> <reserved-u32>
+                   <present> <record> <tail>{var_count}
+
+<present> ::= <byte>{ceil(field_count / 8)}
+                       (* bit i of byte i/8, counting from the LSB, set = field i
+                          carries a restated value *)
+<record>  ::= <byte>{ceil(record_bits / 8)}
+```
+
+One record in the stream's own layout — the same production a DATA frame's records
+use, with `record_count` fixed at one, so the tails follow the fixed portion as in
+§6.4. Stream-scoped: `stream_id` names the stream whose values are restated.
+
+`<axis-base>` is where those values were last written, not where the segment starts,
+and is normally an earlier position than the segment carrying it.
+
+The parse depends on `field_count` and `record_bits` from the schema bound to this
+`stream_id` in this segment, which is the same dependency `<data-payload>` has.
 
 ## DATA — 0x20
 

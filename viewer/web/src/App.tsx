@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from "preact/hooks";
 
-import { axisToDisplay, fetchFileOrStatus, watchProgress } from "./api";
+import { axisToDisplay, fetchFileOrStatus, watchProgress, watchRevisions } from "./api";
 import type { IndexStatus } from "./api";
 import { Drawer } from "./Drawer";
 import { EventLane } from "./EventLane";
@@ -47,6 +47,13 @@ export function App() {
 
   useEffect(() => {
     let closeStream: (() => void) | undefined;
+    let closeRevisions: (() => void) | undefined;
+    // The revision the model was at when it was last fetched. A file being
+    // followed is replaced as it grows, and re-fetching on every event rather
+    // than only on the first is what keeps the extent, the record counts and
+    // the stream list current instead of frozen at whatever existed when the
+    // page opened.
+    let seen = -1;
 
     const load = () => {
       fetchFileOrStatus()
@@ -54,6 +61,11 @@ export function App() {
           if (r.ready) {
             setStatus(null);
             setFile(r.file);
+            closeRevisions ??= watchRevisions((rev) => {
+              if (rev === seen) return;
+              seen = rev;
+              load();
+            });
             return;
           }
           // Still indexing. Show what progress there is and follow the stream
@@ -70,7 +82,10 @@ export function App() {
     };
 
     load();
-    return () => closeStream?.();
+    return () => {
+      closeStream?.();
+      closeRevisions?.();
+    };
   }, []);
 
   // The full extent of the recording, in display units, taken over every

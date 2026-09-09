@@ -27,6 +27,12 @@ type State struct {
 	err   error
 	ready bool
 
+	// revision counts how many times the model has been published. A viewer
+	// following a file that is still being written swaps the model whenever
+	// the recording grows, and this is how a browser already holding one
+	// learns that it is looking at an older answer.
+	revision int64
+
 	// waiters are closed and replaced on every change, so an SSE stream can
 	// block until something actually happens rather than polling.
 	changed chan struct{}
@@ -44,12 +50,21 @@ func (s *State) Progress(done, total int64) {
 	s.notify()
 }
 
-// Ready publishes the finished index.
+// Ready publishes the finished index. Calling it again replaces the model,
+// which is how -follow keeps up with a file that is still being written.
 func (s *State) Ready(f *index.File, q *query.Query) {
 	s.mu.Lock()
 	s.file, s.q, s.ready = f, q, true
+	s.revision++
 	s.mu.Unlock()
 	s.notify()
+}
+
+// Revision is how many times the model has been published.
+func (s *State) Revision() int64 {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	return s.revision
 }
 
 // Fail publishes an indexing failure. The server stays up so the browser can
@@ -160,6 +175,54 @@ func (s *State) handleProgress(w http.ResponseWriter, r *http.Request) {
 			if !send() {
 				return
 			}
+		}
+	}
+}
+
+// handleUpdates streams model revisions for as long as the browser is
+// listening.
+//
+// It is separate from handleProgress rather than folded into it because the two
+// answer different questions and end at different times. Progress is about one
+// scan and is finished when that scan is: a client waiting on it wants to know
+// when it may start drawing. This is about the model being replaced underneath
+// a client that is already drawing, which in -follow mode happens for as long
+// as the recording lasts.
+//
+// The first event carries the current revision, so a client that connects late
+// can tell at once whether what it holds is stale rather than waiting for the
+// next change.
+func (s *State) handleUpdates(w http.ResponseWriter, r *http.Request) {
+	flusher, ok := w.(http.Flusher)
+	if !ok {
+		http.Error(w, "streaming unsupported", http.StatusInternalServerError)
+		return
+	}
+	w.Header().Set("Content-Type", "text/event-stream")
+	w.Header().Set("Cache-Control", "no-cache")
+	w.Header().Set("Connection", "keep-alive")
+	w.Header().Set("X-Accel-Buffering", "no")
+
+	send := func() {
+		s.mu.RLock()
+		rev, ready := s.revision, s.ready
+		s.mu.RUnlock()
+		fmt.Fprintf(w, "event: revision\ndata: {\"revision\":%d,\"ready\":%t}\n\n", rev, ready)
+		flusher.Flush()
+	}
+	send()
+
+	for {
+		_, _, _, _, _, _, changed := s.snapshot()
+		select {
+		case <-r.Context().Done():
+			return
+		case <-changed:
+			send()
+		case <-time.After(20 * time.Second):
+			// A keepalive, so an intermediary does not decide the connection
+			// is idle and drop it.
+			send()
 		}
 	}
 }

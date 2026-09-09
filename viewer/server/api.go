@@ -45,6 +45,7 @@ func NewWithState(state *State, ui http.Handler) *Server {
 	s.mux.HandleFunc("GET /api/export.csv", s.handleExport)
 	s.mux.HandleFunc("GET /api/attach/{name}", s.handleAttach)
 	s.mux.HandleFunc("GET /api/progress", state.handleProgress)
+	s.mux.HandleFunc("GET /api/updates", state.handleUpdates)
 	if ui != nil {
 		s.mux.Handle("/", ui)
 	}

@@ -268,3 +268,23 @@ export function axisLabel(axisKind: string, axisUnit: string): string {
   const unit = axisKind === "time" ? "s" : axisUnit;
   return unit ? `${axisKind} (${unit})` : axisKind;
 }
+
+/**
+ * Subscribes to model revisions.
+ *
+ * The viewer's model is replaced whenever the file it is following grows
+ * (`logbview -follow`), and a browser already holding one has no way to notice.
+ * This says so. The callback fires with each new revision, including the
+ * current one on connect, so a page that loaded a moment ago can tell straight
+ * away whether what it holds is already behind.
+ *
+ * Returns a function that closes the stream.
+ */
+export function watchRevisions(onRevision: (revision: number) => void): () => void {
+  const es = new EventSource("api/updates");
+  es.addEventListener("revision", (e) => {
+    const d = JSON.parse((e as MessageEvent).data) as { revision: number; ready: boolean };
+    if (d.ready) onRevision(d.revision);
+  });
+  return () => es.close();
+}

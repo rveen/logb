@@ -124,7 +124,8 @@ function Badges({ field }: { field: Field }) {
       {field.class === "event" && <span class="badge event">event</span>}
       {/* A guarded field is absent from records whose guard does not hold. The
           chart shows those stretches as gaps, so the tree says so up front. */}
-      {field.guarded && <span class="badge sparse">sparse</span>}
+      {field.guarded && <span class="badge guarded">guarded</span>}
+      {field.hold && <span class="badge hold">held</span>}
       {field.isAxis && <span class="badge axis">axis</span>}
     </span>
   );

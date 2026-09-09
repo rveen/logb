@@ -120,6 +120,7 @@ type fieldDTO struct {
 	Type      string            `json:"type"`
 	Class     string            `json:"class"`
 	Guarded   bool              `json:"guarded"`
+	Hold      bool              `json:"hold"`
 	IsAxis    bool              `json:"isAxis"`
 	BitOffset uint32            `json:"bitOffset"`
 	BitWidth  uint32            `json:"bitWidth"`
@@ -172,7 +173,7 @@ func (s *Server) handleFile(w http.ResponseWriter, r *http.Request) {
 			fd := &st.Fields[i]
 			sd.Fields = append(sd.Fields, fieldDTO{
 				Index: fd.Index, Name: fd.Name, Unit: fd.Unit, Desc: fd.Desc,
-				Type: fd.Type, Class: string(fd.Class), Guarded: fd.Guarded,
+				Type: fd.Type, Class: string(fd.Class), Guarded: fd.Guarded, Hold: fd.Hold,
 				IsAxis: fd.IsAxis, BitOffset: fd.BitOffset, BitWidth: fd.BitWidth,
 				BigEndian: fd.BigEndian, Variable: fd.Variable, Conv: fd.Conv,
 				Meta: fd.Meta,
@@ -208,6 +209,20 @@ type seriesDTO struct {
 	Min  []*float64 `json:"min"`
 	Max  []*float64 `json:"max"`
 	N    []int32    `json:"n"`
+
+	// Hold says the field is written on change, so the trace between two
+	// samples is a level rather than a ramp and must be drawn stepped.
+	Hold bool `json:"hold"`
+	// Anchor is the value in force when the window opened, and where it was
+	// last written — which is normally before the window. Without it a held
+	// channel appears to begin at whatever moment the user happened to scroll
+	// to. Null when nothing was in force yet, which is a gap, not a zero.
+	Anchor *anchorDTO `json:"anchor"`
+}
+
+type anchorDTO struct {
+	X float64 `json:"x"`
+	V float64 `json:"v"`
 }
 
 func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
@@ -232,14 +247,24 @@ func (s *Server) handleSeries(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	// A held field's window is not the whole story: the value in force when the
+	// window opened was set before it, and is what the trace has to start from.
+	var anchor *anchorDTO
+	if fd.Hold {
+		if v, at, ok := st.HoldAt(fd.Index, from); ok {
+			anchor = &anchorDTO{X: at, V: v}
+		}
+	}
+
 	if r.URL.Query().Get("format") == "bin" {
-		writeSeriesBinary(w, e, string(tier))
+		writeSeriesBinary(w, e, string(tier), fd.Hold, anchor)
 		return
 	}
 	writeJSON(w, seriesDTO{
 		Stream: st.Name, Field: fd.Name, Unit: fd.Unit, Run: run,
 		Exact: e.Exact, Tier: string(tier),
 		X: e.X, Min: nullable(e.Min), Max: nullable(e.Max), N: e.N,
+		Hold: fd.Hold, Anchor: anchor,
 	})
 }
 

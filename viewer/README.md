@@ -35,8 +35,8 @@ file length.
 
 What works today:
 
-- Signal tree over streams, fields and runs, with `sparse`, `state` and `axis`
-  badges.
+- Signal tree over streams, fields and runs, with `guarded`, `held`, `state` and
+  `axis` badges.
 - Numeric signals as min/max envelopes, so a one-sample spike survives
   decimation instead of being strided away.
 - Categorical signals (enumerations under `value_to_text`, and bools) as state
@@ -119,6 +119,26 @@ same blind spot today and could use the hook to fix it.
 
 These are properties of the format, and they are easy to break while making the
 UI prettier.
+
+**A held channel is a level, not a ramp.** A field written on change (SPEC §6.10)
+holds its value until the next record, so the segment between two samples is a
+step and interpolating it draws a supply sliding from 5 V to 12 V over a minute
+rather than being commanded there at one instant. Held fields draw stepped, and
+the pane starts from the value in force when the window opened rather than from
+the first sample inside it — otherwise panning to a quiet stretch makes an
+hour-old setpoint look as though it had just been set, and a window with no
+records at all looks like a channel with no value.
+
+That opening value comes from `Stream.HoldAt`, which consults two sources and
+takes the later: the last DATA frame ending before the window, whose last present
+value Tier 1 already records, and the last HOLD frame at or before it. For a
+whole file the frame usually wins. The restatement is what survives a cut — in a
+file whose earlier segments are gone, or a stream joined in progress, the frames
+carrying the original change are not there to consult. `TestHoldSurvivesACutFile`
+is that case.
+
+Nothing in force yet — a setpoint nobody has set — is a gap and draws as one, for
+the same reason an absent guarded sample does.
 
 **An absent sample is not a zero.** A guarded field whose guard does not hold
 returns `logb.ErrFieldAbsent`, and SPEC §6.2 is explicit that this means the

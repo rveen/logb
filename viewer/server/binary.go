@@ -4,6 +4,7 @@ import (
 	"encoding/binary"
 	"math"
 	"net/http"
+	"strconv"
 
 	"github.com/rveen/logb/viewer/decimate"
 )
@@ -46,7 +47,13 @@ const (
 )
 
 // writeSeriesBinary streams an envelope as typed arrays.
-func writeSeriesBinary(w http.ResponseWriter, e decimate.Envelope, tier query_tier) {
+//
+// The hold flag and the anchor travel as headers rather than in the payload,
+// for the same reason the tier does: the body stays a clean run of typed arrays
+// the client views without copying, and neither is per-bucket data. Bumping the
+// payload version to carry two scalars would cost every client a new parse for
+// something no chart reads as an array.
+func writeSeriesBinary(w http.ResponseWriter, e decimate.Envelope, tier query_tier, hold bool, anchor *anchorDTO) {
 	n := len(e.X)
 	buf := make([]byte, seriesHeader+n*(8+8+8+4))
 
@@ -84,6 +91,15 @@ func writeSeriesBinary(w http.ResponseWriter, e decimate.Envelope, tier query_ti
 	// The tier is a header rather than a body field so the payload stays a
 	// clean run of typed arrays the client can view without copying.
 	w.Header().Set("X-Logb-Tier", string(tier))
+	if hold {
+		w.Header().Set("X-Logb-Hold", "1")
+	}
+	if anchor != nil {
+		// Formatted with full float64 precision: an axis position is
+		// epoch-relative ticks, and rounding one is a visibly misplaced step.
+		w.Header().Set("X-Logb-Anchor", strconv.FormatFloat(anchor.X, 'g', -1, 64)+
+			","+strconv.FormatFloat(anchor.V, 'g', -1, 64))
+	}
 	w.Write(buf)
 }
 

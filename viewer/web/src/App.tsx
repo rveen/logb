@@ -191,7 +191,7 @@ export function App() {
               <p>Select a signal to plot.</p>
               <p class="muted">
                 Drag across a chart to zoom; all charts share one axis. Fields marked{" "}
-                <span class="badge sparse">sparse</span> may be absent from some records and are
+                <span class="badge guarded">guarded</span> may be absent from some records and are
                 drawn with gaps rather than zeros.
               </p>
             </div>

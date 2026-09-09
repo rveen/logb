@@ -314,9 +314,11 @@ assume one interval per stream. Both are stated in §6.1.
 
 Still open from that study, and deliberately not built here:
 
-- The viewer ignores HOLD frames (its reader leaves `OnHold` nil, so they are
-  skipped). Rendering a held channel as a step trace anchored at the restated
-  value is a viewer change, not a format one.
+- ~~The viewer ignores HOLD frames.~~ Done: the index collects them, `HoldAt`
+  answers "what was in force here" from the later of a frame statistic and a
+  restatement, and the chart draws held fields stepped and anchored at the value
+  the window opened with. Sidecar version 4 carries the restatements, because
+  unlike schemas they cannot be recovered by replaying a few frames.
 - Nothing in this repository writes a stream live. The daemon, the streaming
   transport and an index that grows as it writes are `ktest`'s work.
 

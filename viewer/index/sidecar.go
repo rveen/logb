@@ -21,7 +21,7 @@ import (
 // not carry. An old cache would give an event lane a density of zero
 // everywhere — a wrong chart, not a slow one, which is precisely the case this
 // constant exists for.
-const sidecarVersion = 3
+const sidecarVersion = 4
 
 // sidecarMagic guards against a file of the same name that is not ours.
 const sidecarMagic = "logbview-index"
@@ -72,6 +72,12 @@ type Sidecar struct {
 
 	// Stats is keyed by stream UUID (hex) and indexed [frame ordinal][field].
 	Stats map[string][][]Stat
+
+	// Holds is keyed by stream UUID (hex), in file order, already rebased onto
+	// Epoch. Unlike schemas these are not recoverable by replaying a few frames
+	// the index points at: a restatement is spread across every segment, so
+	// rebuilding it means the whole-file scan the cache exists to avoid.
+	Holds map[string][]Hold
 }
 
 // MetaKV is a metadata pair. logb.Meta has unexported-free fields but lives in
@@ -170,12 +176,16 @@ func SaveSidecar(fi *File, took time.Duration) error {
 		Segments:    fi.Frames.Segments,
 		Data:        fi.Frames.Data,
 		Stats:       map[string][][]Stat{},
+		Holds:       map[string][]Hold{},
 	}
 	for _, m := range fi.Meta {
 		sc.Meta = append(sc.Meta, MetaKV{m.Key, m.Value})
 	}
 	for _, st := range fi.Streams {
 		sc.Stats[st.UUID] = st.stats
+		if len(st.Holds) > 0 {
+			sc.Holds[st.UUID] = st.Holds
+		}
 	}
 
 	var lastErr error
@@ -338,6 +348,9 @@ func (sc *Sidecar) restore(path string, size int64) (*File, error) {
 	}
 	for _, st := range fi.Streams {
 		st.stats = sc.Stats[st.UUID]
+		// Already rebased when they were saved; the pre-rebase ticks are scan
+		// state and are not needed again.
+		st.Holds = sc.Holds[st.UUID]
 		if len(st.stats) != len(st.FrameList) {
 			return nil, fmt.Errorf("index: cached stream %q has %d frames but %d stat rows",
 				st.Name, len(st.FrameList), len(st.stats))

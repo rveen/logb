@@ -11,8 +11,13 @@ export interface Field {
   desc: string;
   type: string;
   class: Class;
-  /** Values may legitimately be absent; the tree shows this as "sparse". */
+  /** Values may legitimately be absent; the tree shows this as "guarded". */
   guarded: boolean;
+  /**
+   * Written on change: the last value stands until the next record, so the
+   * trace between two samples is a level and not a ramp. SPEC §6.10.
+   */
+  hold: boolean;
   /** This field carries the stream's independent variable. */
   isAxis: boolean;
   bitOffset: number;
@@ -82,6 +87,21 @@ export interface SeriesData {
   min: (number | null)[];
   max: (number | null)[];
   n: number[];
+  /** The field is held; draw the trace stepped rather than interpolated. */
+  hold?: boolean;
+  /**
+   * The value in force when the window opened, and where it was last written —
+   * normally before the window. Absent when nothing was in force yet, which is
+   * a gap and not a zero.
+   */
+  anchor?: Anchor | null;
+}
+
+/** A held field's value on entry to a window. */
+export interface Anchor {
+  /** Where it was last written, in the same units as SeriesData.x. */
+  x: number;
+  v: number;
 }
 
 export interface State {

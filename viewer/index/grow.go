@@ -3,6 +3,7 @@ package index
 import (
 	"encoding/hex"
 	"fmt"
+	"sort"
 )
 
 // resumePoint finds where a scan may restart to pick up a file's new tail.
@@ -120,6 +121,7 @@ func mergeTail(cached, tail *File, resume int64) (*File, error) {
 		clone := *st
 		clone.FrameList = nil
 		clone.stats = nil
+		clone.Holds = nil
 		clone.Records = 0
 		byUUID[st.UUID] = &clone
 		out.Streams = append(out.Streams, &clone)
@@ -130,11 +132,18 @@ func mergeTail(cached, tail *File, resume int64) (*File, error) {
 			clone := *st
 			clone.FrameList = nil
 			clone.stats = nil
+			clone.Holds = nil
 			clone.Records = 0
 			byUUID[st.UUID] = &clone
 			out.Streams = append(out.Streams, &clone)
 		}
 	}
+
+	// Restatements merge on the same rule as frames: the tail re-read the last
+	// cached segment, so everything at or after resume comes from the tail and
+	// the cached copies of it are dropped rather than duplicated.
+	mergeHolds(byUUID, cached, resume, true, 0)
+	mergeHolds(byUUID, tail, resume, false, holdDelta(cached, tail, out))
 
 	if err := reattach(byUUID, cached, keptData, 0, resume, true); err != nil {
 		return nil, err
@@ -145,9 +154,42 @@ func mergeTail(cached, tail *File, resume int64) (*File, error) {
 
 	for _, st := range out.Streams {
 		st.span()
+		sort.Slice(st.Holds, func(i, j int) bool { return st.Holds[i].Offset < st.Holds[j].Offset })
 	}
 	sortFile(out)
 	return out, nil
+}
+
+// mergeHolds copies one side's restatements into the merged streams: the cached
+// side contributes those before resume, the tail side those at or after it.
+//
+// delta corrects a tail that rebased onto its own epoch, exactly as the frame
+// offsets are corrected above. A hold's axis is in the same units as a frame's,
+// which is the whole reason HoldAt can compare the two.
+func mergeHolds(byUUID map[string]*Stream, src *File, resume int64, cachedSide bool, delta int64) {
+	for _, srcStream := range src.Streams {
+		dst := byUUID[srcStream.UUID]
+		if dst == nil {
+			continue
+		}
+		for _, h := range srcStream.Holds {
+			if cachedSide != (int64(h.Offset) < resume) {
+				continue
+			}
+			if !cachedSide && delta != 0 {
+				h.Axis += float64(delta)
+			}
+			dst.Holds = append(dst.Holds, h)
+		}
+	}
+}
+
+// holdDelta is the epoch correction the tail's axis values need, or zero.
+func holdDelta(cached, tail, out *File) int64 {
+	if tail.HasEpoch && out.HasEpoch && tail.Epoch != out.Epoch {
+		return tail.Epoch - out.Epoch
+	}
+	return 0
 }
 
 // reattach copies frames and their statistics from one source into the merged

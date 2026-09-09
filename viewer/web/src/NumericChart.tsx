@@ -1,5 +1,10 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import uPlot from "uplot";
+
+// uPlot's stepped builder, resolved once. align: 1 carries the previous value
+// forward to the next sample, which is what a held field means; align: -1 would
+// claim the new value started at the previous sample.
+const stepped = uPlot.paths.stepped!({ align: 1 });
 import "uplot/dist/uPlot.min.css";
 
 import { axisLabel, axisToDisplay, displayToAxis, fetchSeriesBinary } from "./api";
@@ -73,13 +78,26 @@ export function NumericChart({ signal, from, to, onRange, onRemove }: Props) {
       // is one trace conceptually: an envelope, drawn as its two bounds. The
       // upper bound's row is hidden by class rather than by dropping the
       // series, which still has to exist for the band to reference.
-      series.push({ label: overlay ? name : "min", stroke: color, width: 1, spanGaps: false });
+      // A held field's value stands until the next record, so the segment
+      // between two samples is a level. Interpolating it draws a ramp that
+      // never happened — a supply sliding from 5 V to 12 V over a minute
+      // rather than being commanded there at one instant. align: 1 holds the
+      // old value up to the new sample, which is what "stands until" means.
+      const paths = field.hold ? stepped : undefined;
+      series.push({
+        label: overlay ? name : "min",
+        stroke: color,
+        width: 1,
+        spanGaps: false,
+        paths,
+      });
       series.push({
         label: overlay ? `${name} (upper)` : "max",
         class: overlay ? "lg-hide" : undefined,
         stroke: color,
         width: 1,
         spanGaps: false,
+        paths,
       });
       // The band between the two bounds is the envelope. When the range is
       // exact the bounds coincide and it collapses to a plain line.
@@ -165,6 +183,51 @@ export function NumericChart({ signal, from, to, onRange, onRemove }: Props) {
         for (const d of all) {
           cols.push(pad(d.min, xs.length));
           cols.push(pad(d.max, xs.length));
+        }
+
+        // A held channel was set before the window opened, and the window has
+        // no sample saying so. Without the anchor the trace begins wherever the
+        // user happened to scroll to, which reads as "this was set just now"
+        // for a value that has stood for an hour. The anchor's own x is kept
+        // rather than clamped to the window edge, so a step that happened
+        // inside the window still lands where it happened.
+        const anchors = all.map((d) => d.anchor ?? null);
+        const earliest = anchors.reduce<number | null>(
+          (m, a) => (a && (m === null || a.x < m) ? a.x : m),
+          null,
+        );
+        // Each run carries its own anchor; a run with none contributes null,
+        // which draws as a gap rather than borrowing another run's value. Both
+        // bounds of the envelope take it, because a restated value is one
+        // number and its min and max are that number.
+        const prepend = (at: number) => {
+          xs.unshift(at);
+          for (let i = 0; i < all.length; i++) {
+            const v = anchors[i]?.v ?? null;
+            cols[i * 2] = [v, ...cols[i * 2]];
+            cols[i * 2 + 1] = [v, ...cols[i * 2 + 1]];
+          }
+        };
+
+        if (earliest !== null) {
+          const ax = axisToDisplay(earliest, stream.axisKind, stream.axisExp);
+          if (xs.length === 0) {
+            // A window with no samples at all is the ordinary case for a rack:
+            // pan to a quiet stretch and nothing was written there. The channel
+            // still has a value, and an empty pane would say it does not.
+            //
+            // A level needs two points. The second is placed at the end of the
+            // window or the end of the recording, whichever comes first —
+            // drawing past the last data would claim the value still stood
+            // after the log stopped, which is not something the file says.
+            const end = Math.min(to, axisToDisplay(stream.axisMax, stream.axisKind, stream.axisExp));
+            if (end > ax) {
+              prepend(end);
+              prepend(ax);
+            }
+          } else if (ax < xs[0]) {
+            prepend(ax);
+          }
         }
 
         const u = plot.current;

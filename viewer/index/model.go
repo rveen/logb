@@ -78,7 +78,8 @@ type Field struct {
 	Desc      string
 	Type      string
 	Class     Class
-	Guarded   bool // values may legitimately be absent; the UI shows this as "sparse"
+	Guarded   bool // values may legitimately be absent; the UI shows this as "guarded"
+	Hold      bool // written on change: the last value stands until the next record
 	IsAxis    bool // this field carries the independent variable (AxisExplicit)
 	BitOffset uint32
 	BitWidth  uint32
@@ -151,6 +152,36 @@ type Series struct {
 
 func (s *Series) Len() int { return len(s.Vals) }
 
+// Hold is one restatement of a stream's held values, from a HOLD frame
+// (SPEC §6.10).
+//
+// It is not a sample and must never be drawn as one. It says what was already
+// in force when a segment opened, and Axis says since when — normally a
+// position well before the segment carrying it, which is the difference between
+// a step trace that starts where the value was really set and one that starts
+// at the left edge of whatever window happens to be on screen.
+type Hold struct {
+	// Axis is where the values were last written, in the units Axis.At reports:
+	// epoch-relative ticks for a time axis, the axis unit otherwise.
+	Axis  float64
+	RunID uint32
+
+	// Offset is where the HOLD frame sits in the file, biased the same way a
+	// DataFrame's is. It exists so an incremental re-scan can tell a cached
+	// restatement from one it has just re-read (see grow.go).
+	Offset uint64
+
+	// Vals and Present are parallel to the stream's Fields. Present is not
+	// decoration: a held field with no value yet is a gap, and a zero there
+	// would be the same lie §6.2 refuses for an absent guarded field.
+	Vals    []float64
+	Present []bool
+
+	// ticks is the pre-rebase absolute value for a time axis, kept only until
+	// the scan learns its epoch.
+	ticks int64
+}
+
 // Run is one run of a stream, with the parameters that distinguish it.
 type Run struct {
 	ID     uint32
@@ -201,11 +232,72 @@ type Stream struct {
 	// scan finishes and the axis has been rebased.
 	FrameList []DataFrame
 
+	// Holds are the stream's restatements in file order, one per segment that
+	// carried one. Empty for a stream with no held fields, and for a file
+	// written before HOLD frames existed.
+	Holds []Hold
+
 	// stats is Tier 1, indexed [frame ordinal][field index], parallel to
 	// FrameList. Decoded samples are deliberately not kept: holding them is
 	// what makes a large file impossible, and everything a chart needs at low
 	// zoom is answerable from these.
 	stats [][]Stat
+}
+
+// HoldAt returns the value of a held field in force at axis position at, and
+// where it was last written.
+//
+// Two sources can answer this and the later one wins:
+//
+//   - The last DATA frame that ends before at. Tier 1 already records each
+//     frame's last present value per field, so this costs no decoding — and for
+//     a whole file it is usually the better answer, because it sees changes
+//     that happened after the most recent restatement.
+//   - The last HOLD frame at or before at. This is what survives a cut: in a
+//     file whose earlier segments are gone, or a live stream joined in
+//     progress, the frames holding the original change are not there to consult
+//     and the restatement is the only record of it.
+//
+// The second is why the frame exists; the first is why a complete file rarely
+// needs it. Both are cheap, so both are consulted.
+//
+// ok is false when nothing was in force yet — a setpoint nobody had set — which
+// is a gap and must be drawn as one.
+func (s *Stream) HoldAt(field int, at float64) (val, since float64, ok bool) {
+	if field < 0 || field >= len(s.Fields) {
+		return 0, 0, false
+	}
+
+	// Frames are in file order and a stream's axis is non-decreasing across
+	// them, so the last frame ending at or before at is the last one whose
+	// values are all in the past.
+	for i := len(s.FrameList) - 1; i >= 0; i-- {
+		last := s.FrameList[i].Last()
+		if last > at {
+			continue
+		}
+		if st := s.Stat(i, field); !st.Empty() {
+			val, since, ok = st.Last, last, true
+		}
+		break
+	}
+
+	for i := len(s.Holds) - 1; i >= 0; i-- {
+		h := s.Holds[i]
+		if h.Axis > at {
+			continue
+		}
+		if field < len(h.Present) && h.Present[field] {
+			// Only when the restatement is newer than the frame evidence. A
+			// segment restating an hour-old value says nothing about a change
+			// that happened since.
+			if !ok || h.Axis > since {
+				val, since, ok = h.Vals[field], h.Axis, true
+			}
+		}
+		break
+	}
+	return val, since, ok
 }
 
 // Stat returns the Tier 1 summary of one field over one of this stream's

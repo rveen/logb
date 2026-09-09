@@ -1,4 +1,5 @@
 import type {
+  Anchor,
   EventsData,
   FileInfo,
   FrameMapData,
@@ -115,6 +116,16 @@ export async function fetchSeriesBinary(
   const toNullable = (a: Float64Array) =>
     Array.from(a, (v, i) => (counts[i] === 0 ? null : v));
 
+  // The hold flag and the anchor ride in headers, not in the payload, so the
+  // body stays a run of typed arrays that can be viewed without copying.
+  // Neither is per-bucket data.
+  const anchorHeader = r.headers.get("X-Logb-Anchor");
+  let anchor: Anchor | null = null;
+  if (anchorHeader) {
+    const [ax, av] = anchorHeader.split(",").map(Number);
+    if (Number.isFinite(ax) && Number.isFinite(av)) anchor = { x: ax, v: av };
+  }
+
   return {
     stream: "",
     field,
@@ -126,6 +137,8 @@ export async function fetchSeriesBinary(
     min: toNullable(min),
     max: toNullable(max),
     n: Array.from(counts),
+    hold: r.headers.get("X-Logb-Hold") === "1",
+    anchor,
   };
 }
 

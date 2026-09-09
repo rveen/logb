@@ -240,9 +240,17 @@ body {
   border-color: var(--accent);
   color: var(--accent);
 }
-.badge.sparse {
+.badge.guarded {
   border-color: var(--warn);
   color: var(--warn);
+}
+
+/* Held: written on change, so the trace between samples is a level. Deliberately
+   distinct from .guarded — one says a value may be missing, the other says the
+   gaps between values are meaningful, and a field can be both. */
+.badge.hold {
+  border-color: var(--ok);
+  color: var(--ok);
 }
 
 .attachments,

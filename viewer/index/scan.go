@@ -177,7 +177,15 @@ func scanReader(r io.Reader, path string, size int64, offsetBias int64, progress
 	// into random access additionally needs an io.ReaderAt, which is what
 	// NewAccessor wants.
 	idx := &builder{offsetBias: uint64(offsetBias)}
+
+	// OnFrame fires for every frame before it is interpreted, so latching the
+	// offset here is how OnHold learns where its frame was — the same pairing
+	// onBatch makes for DATA frames.
+	var holdOffset uint64
 	rd.OnFrame = func(fr logb.Frame) {
+		if fr.Type == logb.FrameHold {
+			holdOffset = fr.Offset + uint64(offsetBias)
+		}
 		idx.onFrame(fr)
 		if progress != nil {
 			progress(int64(fr.Offset)+offsetBias+int64(fr.Size()), size)
@@ -192,6 +200,21 @@ func scanReader(r io.Reader, path string, size int64, offsetBias int64, progress
 			byUUID[s.UUID] = st
 			fi.Streams = append(fi.Streams, st)
 		}
+	}
+
+	// HOLD frames never reach Next — a restatement is not a record, and counting
+	// one would add a spurious sample to every held channel at every segment
+	// boundary. They arrive here instead, in file order, interleaved with the
+	// batches for the same reason OnFrame is.
+	rd.OnHold = func(h *logb.Hold) {
+		st := byUUID[h.Schema.UUID]
+		if st == nil {
+			// A HOLD frame can only follow the schema that binds its stream, so
+			// this means the schema was skipped — an axis mode this reader does
+			// not know. Nothing to attach the values to.
+			return
+		}
+		st.noteHold(h, holdOffset)
 	}
 
 	// Absolute ticks are accumulated during the scan and rebased at the end.
@@ -256,6 +279,9 @@ func scanReader(r io.Reader, path string, size int64, offsetBias int64, progress
 	if haveEpoch {
 		fi.Epoch, fi.HasEpoch = epoch, true
 		idx.idx.rebaseFrames(epoch)
+		for _, st := range fi.Streams {
+			st.rebaseHolds(epoch)
+		}
 	}
 	idx.idx.sortSegmentRuns()
 	fi.Frames = &idx.idx
@@ -350,6 +376,7 @@ func newStream(s *logb.Schema) *Stream {
 			Type:    fd.Type.String(),
 			Class:   classify(fd),
 			Guarded: fd.Guarded,
+			Hold:    fd.Hold,
 			// The field carrying the independent variable is not a signal in
 			// its own right. Deriving this from the schema is what lets the
 			// viewer avoid cmd/logbdump's hardcoded `fd.Name == "t_us"` check.
@@ -390,6 +417,75 @@ func (s *Stream) noteRun(id uint32, r *logb.Run) {
 // Taken from the frame index rather than from decoded samples, because the
 // samples are no longer kept. Every DATA frame carries its own axis_base and
 // its records' extent was measured during the scan, so this costs nothing.
+// noteHold records one restatement, with the axis left in absolute ticks until
+// the scan learns its epoch.
+//
+// A held field's value is stored the way a sample is — converted for a numeric
+// field, raw for a categorical one — so that a restatement and a record of the
+// same field are directly comparable. They have to be: HoldAt chooses between
+// them by axis position, and a units mismatch there would be invisible.
+func (s *Stream) noteHold(h *logb.Hold, offset uint64) {
+	held := false
+	for i := range s.Fields {
+		if s.Fields[i].Hold {
+			held = true
+			break
+		}
+	}
+	if !held {
+		// A writer may restate fields this reader does not consider held; there
+		// is nothing to anchor, so there is nothing to keep.
+		return
+	}
+
+	rec := Hold{
+		RunID:   h.RunID,
+		Offset:  offset,
+		Vals:    make([]float64, len(s.Fields)),
+		Present: make([]bool, len(s.Fields)),
+	}
+	if s.AxisKind == "time" {
+		rec.ticks = h.AxisBase.Ticks()
+		rec.Axis = float64(rec.ticks)
+	} else {
+		rec.Axis = h.AxisBase.Float()
+	}
+
+	for i := range s.Fields {
+		fd := &s.Fields[i]
+		if !h.Has(fd.Index) {
+			continue
+		}
+		var v any
+		var err error
+		if fd.Class == ClassCategorical {
+			v, err = h.Raw(fd.Index)
+		} else {
+			v, err = h.Value(fd.Index)
+		}
+		if err != nil {
+			continue
+		}
+		f, ok := asFloat(v)
+		if !ok || !finite(f) {
+			continue
+		}
+		rec.Vals[i], rec.Present[i] = f, true
+	}
+	s.Holds = append(s.Holds, rec)
+}
+
+// rebaseHolds moves a time axis onto the file's epoch, exactly as the frame
+// index is rebased, so a hold and a frame are always in the same units.
+func (s *Stream) rebaseHolds(epoch int64) {
+	if s.AxisKind != "time" {
+		return
+	}
+	for i := range s.Holds {
+		s.Holds[i].Axis = float64(s.Holds[i].ticks - epoch)
+	}
+}
+
 func (s *Stream) span() {
 	first := true
 	for _, f := range s.FrameList {

@@ -47,6 +47,30 @@ type Writer struct {
 	// A nil OnFrame costs one branch per frame.
 	OnFrame func(Frame)
 
+	// OnSchema, if set, is called each time this writer emits a SCHEMA frame,
+	// with the segment-scoped id it bound the stream to. It fires for every
+	// restatement, not only the first declaration, because that is what the
+	// reader's hook does and because a segment's preamble is exactly what a
+	// consumer needs to decode that segment's frames.
+	//
+	// The id is passed for the same reason as on the reader: it is segment
+	// scoped, every SYNC rebinds it (§6.6), and a caller accumulating across
+	// segments must key on Schema.UUID and treat the id as routing.
+	//
+	// A nil OnSchema costs one branch per schema frame.
+	OnSchema func(s *Schema, streamID uint16)
+
+	// OnHold, if set, is called for every HOLD frame this writer emits.
+	//
+	// The Hold handed over is decoded back out of the bytes just written,
+	// rather than assembled from the writer's own state. That costs one small
+	// decode per held stream per segment and buys the guarantee that matters:
+	// what a watcher here sees is what a reader of the file will see, because
+	// it came through the same decoder from the same bytes.
+	//
+	// A nil OnHold costs one branch per hold frame.
+	OnHold func(*Hold)
+
 	index map[[16]byte][]indexEntry
 	order [][16]byte // index groups in first-seen order, for reproducible output
 
@@ -234,7 +258,20 @@ func (w *Writer) writeHold(s *Schema, h *holdState) error {
 	}
 	e.raw(bits)
 	e.raw(h.record)
-	return w.frame(FrameHold, s.id, e.b)
+	if err := w.frame(FrameHold, s.id, e.b); err != nil {
+		return err
+	}
+	if w.OnHold != nil {
+		hold, err := decodeHold(s, e.b)
+		if err != nil {
+			// The writer just produced a payload its own decoder rejects.
+			// That is a bug in this file, not a caller error, and reporting
+			// it is better than handing back a silently wrong restatement.
+			return fmt.Errorf("logb: writer produced an undecodable HOLD frame for %q: %w", s.Name, err)
+		}
+		w.OnHold(hold)
+	}
+	return nil
 }
 
 func (w *Writer) writeSchema(s *Schema) error {
@@ -290,7 +327,13 @@ func (w *Writer) writeSchema(s *Schema) error {
 		e.kv(f.Meta)
 	}
 	e.kv(s.Meta)
-	return w.frame(FrameSchema, s.id, e.b)
+	if err := w.frame(FrameSchema, s.id, e.b); err != nil {
+		return err
+	}
+	if w.OnSchema != nil {
+		w.OnSchema(s, s.id)
+	}
+	return nil
 }
 
 func (w *Writer) writeRun(r *Run) error {

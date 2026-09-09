@@ -3,7 +3,9 @@ package logb
 import (
 	"bytes"
 	"errors"
+	"fmt"
 	"io"
+	"reflect"
 	"testing"
 )
 
@@ -151,4 +153,114 @@ func (f *failAfter) Write(b []byte) (int, error) {
 	}
 	f.written += room
 	return room, io.ErrShortWrite
+}
+
+// The same equivalence for the other two hooks. A schema bound while writing
+// must be the schema a reader binds, to the same segment-scoped id; and a
+// restatement written must be the restatement read back, value for value.
+func TestOnSchemaAndOnHoldMatchTheReader(t *testing.T) {
+	type bind struct {
+		uuid [16]byte
+		name string
+		id   uint16
+	}
+	type held struct {
+		uuid    [16]byte
+		base    AxisVal
+		runID   uint32
+		present []bool
+		vals    []string
+	}
+
+	var out bytes.Buffer
+	w, err := NewWriter(&out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var wroteS []bind
+	var wroteH []held
+	w.OnSchema = func(s *Schema, id uint16) {
+		wroteS = append(wroteS, bind{s.UUID, s.Name, id})
+	}
+	w.OnHold = func(h *Hold) { wroteH = append(wroteH, holdOf(t, h)) }
+
+	s := rackSchema()
+	if err := w.AddStream(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.BeginSegment(1_700_000_000_000_000_000); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteData(s, TickVal(0), 0, 1, encodeRackRec(1_000_000_000, 12, 11.98)); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.SetHold(s, TickVal(1_000_000_000), 0, []bool{false, true, true},
+		encodeRackRec(1_000_000_000, 12, 11.98)); err != nil {
+		t.Fatal(err)
+	}
+	// Several segments, each of which restates schema and hold.
+	for seg := 0; seg < 4; seg++ {
+		if err := w.BeginSegment(0); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := NewReader(bytes.NewReader(out.Bytes()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var readS []bind
+	var readH []held
+	r.OnSchema = func(s *Schema, id uint16) {
+		readS = append(readS, bind{s.UUID, s.Name, id})
+	}
+	r.OnHold = func(h *Hold) { readH = append(readH, holdOf(t, h)) }
+	for {
+		if _, err := r.Next(); errors.Is(err, io.EOF) {
+			break
+		} else if err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	if len(wroteS) == 0 || len(wroteH) == 0 {
+		t.Fatalf("nothing to compare: %d schemas, %d holds", len(wroteS), len(wroteH))
+	}
+	if !reflect.DeepEqual(wroteS, readS) {
+		t.Errorf("schema bindings differ:\n written %+v\n read    %+v", wroteS, readS)
+	}
+	if !reflect.DeepEqual(wroteH, readH) {
+		t.Errorf("restatements differ:\n written %+v\n read    %+v", wroteH, readH)
+	}
+}
+
+// holdOf reduces a Hold to what a comparison can see through its exported API,
+// which is deliberately how the index will read it too.
+func holdOf(t *testing.T, h *Hold) (out struct {
+	uuid    [16]byte
+	base    AxisVal
+	runID   uint32
+	present []bool
+	vals    []string
+}) {
+	t.Helper()
+	out.uuid, out.base, out.runID = h.Schema.UUID, h.AxisBase, h.RunID
+	for i := range h.Schema.Fields {
+		out.present = append(out.present, h.Has(i))
+		// Rendered rather than compared as a float, because an absent field
+		// has no value and NaN is not equal to itself.
+		v := "absent"
+		if h.Has(i) {
+			raw, err := h.Value(i)
+			if err != nil {
+				t.Fatalf("hold field %d: %v", i, err)
+			}
+			v = fmt.Sprint(raw)
+		}
+		out.vals = append(out.vals, v)
+	}
+	return out
 }

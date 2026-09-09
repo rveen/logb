@@ -30,6 +30,23 @@ type Writer struct {
 	Codec  Codec
 	Filter Filter
 
+	// OnFrame, if set, is called for every frame this writer emits, in the
+	// order it emits them and once the frame's bytes have gone out. It is the
+	// mirror of Reader.OnFrame and exists for the same reason: the sequence of
+	// frames is the format, and every other method here deliberately hides it.
+	//
+	// What it buys is an index built as the file is written rather than by
+	// reading the file back. A writer already knows where each frame landed,
+	// and at WriteData it holds the records uncompressed, which is the one
+	// moment in a file's life when summarising them is free. A scan has to
+	// re-read and re-decompress the whole file to learn the same things.
+	//
+	// The frame is reported only after a successful write, so a caller never
+	// records a frame the file does not contain.
+	//
+	// A nil OnFrame costs one branch per frame.
+	OnFrame func(Frame)
+
 	index map[[16]byte][]indexEntry
 	order [][16]byte // index groups in first-seen order, for reproducible output
 
@@ -423,6 +440,7 @@ func (w *Writer) writeIndex() error {
 
 // frame writes one frame: header, payload, CRC over both.
 func (w *Writer) frame(t FrameType, streamID uint16, payload []byte) error {
+	off := w.off
 	hdr := make([]byte, 8)
 	binary.LittleEndian.PutUint32(hdr[0:], uint32(len(payload)))
 	hdr[4] = byte(t)
@@ -440,7 +458,18 @@ func (w *Writer) frame(t FrameType, streamID uint16, payload []byte) error {
 	}
 	var tail [4]byte
 	binary.LittleEndian.PutUint32(tail[:], sum)
-	return w.write(tail[:])
+	if err := w.write(tail[:]); err != nil {
+		return err
+	}
+	if w.OnFrame != nil {
+		w.OnFrame(Frame{
+			Offset:   off,
+			Type:     t,
+			StreamID: streamID,
+			Len:      uint32(len(payload)),
+		})
+	}
+	return nil
 }
 
 // zstdEnc is built once and shared: EncodeAll is safe for concurrent use, and

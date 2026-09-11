@@ -220,7 +220,16 @@ func rawValue(rec []byte, f *Field) (any, error) {
 			return nil, ErrCorrupt
 		}
 		if f.Type == TypeString {
-			return string(rec[off : off+n]), nil
+			// A fixed string is zero-padded (SPEC.md, on `string`): the value
+			// ends at the first zero byte, and the padding is not part of it.
+			s := rec[off : off+n]
+			for i, c := range s {
+				if c == 0 {
+					s = s[:i]
+					break
+				}
+			}
+			return string(s), nil
 		}
 		return rec[off : off+n], nil
 

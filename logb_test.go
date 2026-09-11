@@ -1303,6 +1303,70 @@ func TestBadGuardsRejected(t *testing.T) {
 	}
 }
 
+// TestFixedStringIsZeroPadded pins the rule for a fixed string field: a value
+// shorter than the field is zero-padded and reads back without the padding,
+// and a value that fills the field reads back whole. Fixed bytes are not
+// trimmed — a payload's trailing zeros are data — so the same bytes read as a
+// bytes field keep all of them.
+func TestFixedStringIsZeroPadded(t *testing.T) {
+	s := &Schema{
+		UUID:       uid("logger/names"),
+		Name:       "names",
+		RecordBits: 128,
+		AxisKind:   AxisTime,
+		AxisMode:   AxisImplicit,
+		AxisExp:    -9,
+		AxisUnit:   "s",
+		AxisStep:   TickVal(1_000_000),
+		Fields: []Field{
+			{Name: "name", BitOffset: 0, BitWidth: 64, Type: TypeString},
+			{Name: "raw", BitOffset: 64, BitWidth: 64, Type: TypeBytes},
+		},
+	}
+	recs := make([]byte, 32)
+	copy(recs[0:], "e2e") // shorter than the field: the rest stays zero
+	copy(recs[8:], "e2e")
+	copy(recs[16:], "abcdefgh") // fills the field: no zero byte at all
+	copy(recs[24:], "abcdefgh")
+
+	var out bytes.Buffer
+	w, _ := NewWriter(&out)
+	if err := w.AddStream(s); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.WriteData(s, TickVal(0), 0, 2, recs); err != nil {
+		t.Fatal(err)
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	r, err := NewReader(&out)
+	if err != nil {
+		t.Fatal(err)
+	}
+	b, err := r.Next()
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i, want := range []string{"e2e", "abcdefgh"} {
+		v, err := b.Value(i, 0)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if v != want {
+			t.Errorf("record %d: string field reads %q, want %q", i, v, want)
+		}
+		raw, err := b.Value(i, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, ok := raw.([]byte); !ok || len(got) != 8 {
+			t.Errorf("record %d: bytes field reads %v, want all 8 bytes", i, raw)
+		}
+	}
+}
+
 // TestOnSchemaSeesSilentStreams is the reason Reader.OnSchema exists.
 //
 // Next only ever hands out a schema attached to a batch, so a stream that was

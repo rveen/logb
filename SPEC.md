@@ -621,6 +621,16 @@ This is what a CAN payload is (§6.4), and it is the common case. Setting bit 0
 moves the field's bytes to the tail and costs the batch its seekability — see
 §6.4, which is where the length prefix lives.
 
+**A fixed `string` is zero-padded.** A writer whose value is shorter than the
+field fills the rest with 0x00 bytes, and a reader MUST return the value up to
+the first zero byte, or the whole field if it holds none. Without the rule the
+padding is part of the value, and a name written into a 32-byte field reads back
+as the name followed by NULs — in every viewer, and in every string comparison
+anyone makes against it. The price is that a fixed string cannot contain U+0000;
+a variable one can, because its length is explicit. Fixed `bytes` are not
+trimmed: a CAN payload's trailing zeros are data, and the frame's own length
+field is what says how many of them it carried.
+
 Seven types. MDF4 has fifteen, including three string encodings and a "canopen
 date" that exists because someone needed it in 1997. UTF-16 and Latin-1 channels
 convert to UTF-8 on import; a byte-exact round trip of a foreign format's string

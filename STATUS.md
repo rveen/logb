@@ -170,7 +170,7 @@ one thing about bus recordings that no container solves by being clever:
 
 > A CAN recording is not self-explanatory in *any* format. It holds frames; what
 > they mean lives in a database owned by whoever built the vehicle, and it is not
-> on the wire. The files here do not carry it — `testdata/mdf/obd2-trunc.mf4` has
+> on the wire. The files here do not carry it — `testdata/mdf/ex2-obd.mf4` has
 > no attachments at all, and the only clue to what the recording is about is the
 > free text `Peugeot208` in an XML header comment. But a Logb file converted
 > *without* `-dbc` is in exactly the same position, so this is not a point the
@@ -181,7 +181,7 @@ one thing about bus recordings that no container solves by being clever:
 > **To be verified: what MDF4 says about attaching a bus database.** The claim
 > above is about the files in `testdata/mdf`, not about the standard, and the
 > difference matters. What is established: MDF4 has AT blocks that carry an
-> arbitrary file with a filename and a MIME type — `sample3.mf4` embeds one, and
+> arbitrary file with a filename and a MIME type — `ex5.mf4` embeds one, and
 > `mdf/mdf.go` reads them — so a logger *could* put a DBC in a recording. What is
 > **not** established, because the ASAM spec is paywalled and this project works
 > only from public sources (README.md:36):
@@ -516,11 +516,6 @@ freezable, and committed.
   §8's defined behaviour rather than a gap in it.
 - `cmd/logbdump` has no golden test of its own output. The fixture pins the
   bytes; nothing pins the rendering.
-- **`go test ./...` does not pass.** The `mdf` and `spice` tests name fixtures
-  that are not in the repository — `mdf/{mdf,convert,bus}_test.go` ask for
-  `sample2.mf4`, `sample3.mf4`, `Discrete_deflate.mf4` and `obd2-trunc.mf4`,
-  and `spice/spice_test.go` asks for `testdata/test.op.raw`. What is committed is
-  `ex1`, `ex2-obd`, `ex3`, `ex5` and `ex6-compressed`, which is also what
-  `testdata/mdf/README.md` documents; the fixtures were renamed and the tests
-  were not. The `logb` and `dbc` packages are green. This contradicts the claim
-  in that README that the suite is self-contained, and is the first thing to fix.
+- The LTspice operating-point fixture `testdata/test.op.raw` is not in the
+  repository, so `spice/spice_test.go` skips the test that reads it. Everything
+  else in `go test ./...` runs against committed fixtures.

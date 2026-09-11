@@ -39,17 +39,17 @@ func TestRead(t *testing.T) {
 		master   string
 		first    []float64 // the master's first values
 	}{
-		{"sample2.mf4", 410, true, 1, "", 20, 4, "time",
+		{"ex3.mf4", 410, true, 1, "", 20, 4, "time",
 			[]float64{10, 10.05, 10.1, 10.15, 10.2}},
-		{"sample3.mf4", 410, true, 1, "CCVS1_CPC", 3, 2, "t",
+		{"ex5.mf4", 410, true, 1, "CCVS1_CPC", 3, 2, "t",
 			[]float64{145996.338439, 145996.43817, 145996.53830800002}},
-		{"Discrete_deflate.mf4", 410, true, 1, "100ms_sync", 124, 2, "time",
+		{"ex1.mf4", 410, true, 1, "100ms_sync", 124, 2, "time",
 			[]float64{0.11275759999998419, 0.21275760000000693, 0.31275760000002967}},
-		{"sample_compressed.mf4", 410, true, 1, "AcqName", 100000, 2, "Time",
+		{"ex6-compressed.mf4", 410, true, 1, "AcqName", 100000, 2, "Time",
 			[]float64{0.0031, 0.0062, 0.0093, 0.0124, 0.0155}},
 		// Unfinalized: every cycle count in this file is zero, so the record
 		// count below is one this reader worked out by walking the data.
-		{"obd2-trunc.mf4", 411, false, 2, "CAN_DataFrame", 1619, 10, "Timestamp",
+		{"ex2-obd.mf4", 411, false, 2, "CAN_DataFrame", 1619, 10, "Timestamp",
 			[]float64{186.90885, 186.92370000000003, 186.92925000000002}},
 	}
 
@@ -102,7 +102,7 @@ func TestRead(t *testing.T) {
 // stored as one bytes channel with its fields as members; keeping the container
 // would mean a 14-byte blob where the ID, the DLC and the payload should be.
 func TestComposition(t *testing.T) {
-	g := read(t, "obd2-trunc.mf4").Groups[0]
+	g := read(t, "ex2-obd.mf4").Groups[0]
 
 	var names []string
 	for _, c := range g.Channels {
@@ -138,7 +138,7 @@ func TestComposition(t *testing.T) {
 // TestVLSD checks that variable-length samples are resolved rather than left as
 // the offsets MDF stores.
 func TestVLSD(t *testing.T) {
-	g := read(t, "obd2-trunc.mf4").Groups[0]
+	g := read(t, "ex2-obd.mf4").Groups[0]
 
 	var payload *Channel
 	for _, c := range g.Channels {
@@ -165,7 +165,7 @@ func TestVLSD(t *testing.T) {
 // TestUnsorted checks the demultiplexing of a record-id-tagged data group,
 // including the group that saw no traffic at all.
 func TestUnsorted(t *testing.T) {
-	m := read(t, "obd2-trunc.mf4")
+	m := read(t, "ex2-obd.mf4")
 	if len(m.Groups) != 2 {
 		t.Fatalf("%d groups, want 2 (CAN and LIN)", len(m.Groups))
 	}

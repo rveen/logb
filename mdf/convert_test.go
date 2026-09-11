@@ -89,11 +89,11 @@ func collect(t *testing.T, r *logb.Reader) map[string]*stripe {
 
 func TestRoundTrip(t *testing.T) {
 	for _, name := range []string{
-		"sample2.mf4",
-		"sample3.mf4",
-		"Discrete_deflate.mf4",
-		"sample_compressed.mf4",
-		"obd2-trunc.mf4",
+		"ex3.mf4",
+		"ex5.mf4",
+		"ex1.mf4",
+		"ex6-compressed.mf4",
+		"ex2-obd.mf4",
 	} {
 		// Both framings, because transpose reorders every byte of the fixed
 		// portion on the way out and back (§8) and the tail region does not
@@ -230,7 +230,7 @@ func same(got, want any) bool {
 // the eight bytes of the frame say — not an offset into a block somewhere else,
 // which is how MDF stores it.
 func TestCANDetail(t *testing.T) {
-	path := "../testdata/mdf/obd2-trunc.mf4"
+	path := "../testdata/mdf/ex2-obd.mf4"
 	got := collect(t, convert(t, path, Options{}))
 
 	st := got["CAN_DataFrame"]
@@ -282,7 +282,7 @@ func TestCANDetail(t *testing.T) {
 // TestMetadata checks what travels alongside the samples: the attachment, the
 // recording's wall clock, and the note that a file was never finalized.
 func TestMetadata(t *testing.T) {
-	r := convert(t, "../testdata/mdf/sample3.mf4", Options{})
+	r := convert(t, "../testdata/mdf/ex5.mf4", Options{})
 	collect(t, r) // drain, so every frame is seen
 
 	if got := len(r.Attachments); got != 1 {
@@ -307,25 +307,25 @@ func TestMetadata(t *testing.T) {
 		t.Errorf("mdf.version = %q, want 410", meta["mdf.version"])
 	}
 	if _, ok := meta["mdf.finalized"]; ok {
-		t.Error("sample3 is finalized; nothing should say otherwise")
+		t.Error("ex5 is finalized; nothing should say otherwise")
 	}
 
 	// The unfinalized one says so.
-	r2 := convert(t, "../testdata/mdf/obd2-trunc.mf4", Options{})
+	r2 := convert(t, "../testdata/mdf/ex2-obd.mf4", Options{})
 	collect(t, r2)
 	for _, m := range r2.Meta {
 		if m.Key == "mdf.finalized" && m.Value == "false" {
 			return
 		}
 	}
-	t.Error("obd2-trunc.mf4 is unfinalized and the converted file does not record it")
+	t.Error("ex2-obd.mf4 is unfinalized and the converted file does not record it")
 }
 
-// TestConversionSurvives is about sample3's speed channel, whose MDF conversion
+// TestConversionSurvives is about ex5's speed channel, whose MDF conversion
 // is a value-to-text table with a numeric default. Logb cannot hold both, and
 // the measurement is what matters: the numbers must come through.
 func TestConversionSurvives(t *testing.T) {
-	got := collect(t, convert(t, "../testdata/mdf/sample3.mf4", Options{}))
+	got := collect(t, convert(t, "../testdata/mdf/ex5.mf4", Options{}))
 	st := got["CCVS1_CPC"]
 	if st == nil {
 		t.Fatal("no CCVS1_CPC stream")
@@ -365,7 +365,7 @@ func TestConversionSurvives(t *testing.T) {
 // TestAxisIsTicks checks the axis representation, which is the one place the
 // bytes are not copied but recomputed.
 func TestAxisIsTicks(t *testing.T) {
-	got := collect(t, convert(t, "../testdata/mdf/sample2.mf4", Options{}))
+	got := collect(t, convert(t, "../testdata/mdf/ex3.mf4", Options{}))
 	st := got["group0"]
 	if st == nil {
 		t.Fatalf("streams: %v", keysOf(got))
@@ -399,7 +399,7 @@ func TestAxisIsTicks(t *testing.T) {
 // TestWarnings checks that what could not be carried across is reported rather
 // than dropped in silence.
 func TestWarnings(t *testing.T) {
-	f, err := os.Open("../testdata/mdf/Discrete_deflate.mf4")
+	f, err := os.Open("../testdata/mdf/ex1.mf4")
 	if err != nil {
 		t.Fatal(err)
 	}

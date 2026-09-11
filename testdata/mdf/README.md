@@ -20,7 +20,7 @@ The first four come from the test suite of
 suite, where it appears as `test/obd2/a.mf4`; it originates with a CANedge
 logger's public sample data.
 
-`obd2-trunc.mf4` is the **first 64 KiB** of that 1 MB file. Truncating it is
+`ex2-obd.mf4` is the **first 64 KiB** of that 1 MB file. Truncating it is
 sound rather than lucky: the recording is *unfinalized* (`UnFinMF `,
 std_flags=37), meaning its cycle counts were never written and the final DT
 block's length field was never patched, so a reader must already derive the

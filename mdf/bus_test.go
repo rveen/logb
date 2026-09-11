@@ -19,7 +19,7 @@ import (
 
 func obd2(t *testing.T) (*File, *dbc.File) {
 	t.Helper()
-	f, err := os.Open("../testdata/mdf/obd2-trunc.mf4")
+	f, err := os.Open("../testdata/mdf/ex2-obd.mf4")
 	if err != nil {
 		t.Fatal(err)
 	}

@@ -392,12 +392,12 @@ go run ./cmd/logbdump -resync /tmp/x.logb # resynchronise, from the CLI
 go run ./cmd/raw2logb testdata/test.raw   # import a SPICE raw file
 go run ./cmd/logbdump testdata/test.logb  # …and read it back
 
-go run ./cmd/mdf2logb testdata/mdf/obd2-trunc.mf4   # import an MDF4 recording
-go run ./cmd/logbdump -n 4 testdata/mdf/obd2-trunc.logb
+go run ./cmd/mdf2logb testdata/mdf/ex2-obd.mf4   # import an MDF4 recording
+go run ./cmd/logbdump -n 4 testdata/mdf/ex2-obd.logb
 
 # …and with a database, the same recording decoded into signals
-go run ./cmd/mdf2logb -dbc testdata/obd2.dbc testdata/mdf/obd2-trunc.mf4
-go run ./cmd/logbdump -n 8 testdata/mdf/obd2-trunc.logb
+go run ./cmd/mdf2logb -dbc testdata/obd2.dbc testdata/mdf/ex2-obd.mf4
+go run ./cmd/logbdump -n 8 testdata/mdf/ex2-obd.logb
 ```
 
 `raw2logb` applies the mapping in [SPEC.md §11](SPEC.md): LTspice's binary raw
@@ -454,7 +454,7 @@ reference algorithm over 465,600 cases. The parser is the [`dbc`](dbc/) package.
 
 Worth knowing on measurement data: `-transpose` groups each record byte together
 before compressing (§8), the same idea MDF spells `DZ zip_type=1`. On
-`testdata/mdf/sample_compressed.mf4` — 100 000 records of a ramp — it is the
+`testdata/mdf/ex6-compressed.mf4` — 100 000 records of a ramp — it is the
 difference between a 767 KB output and a 46 KB one. `mdf2logb` says so when the
 source file used the trick and you did not.
 

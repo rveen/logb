@@ -126,7 +126,7 @@ func schemaOf(raw *Raw, l Layout, analysis string, o Options) (*logb.Schema, err
 	}
 
 	axisVar := raw.Vars[0]
-	kind := strings.ToLower(axisVar.Type)
+	kind := typeName(axisVar.Type)
 	switch {
 	case analysis == "op":
 		// An operating point has one point and no independent variable. The
@@ -240,7 +240,7 @@ func encode(raw *Raw, s *logb.Schema, l Layout, from, to int) (logb.AxisVal, []b
 			copy(dst, src)
 			continue
 		}
-		axis := math.Abs(math.Float64frombits(binary.LittleEndian.Uint64(src))) + raw.Offset
+		axis := raw.axis(src) + raw.Offset
 		if s.AxisKind == logb.AxisTime {
 			binary.LittleEndian.PutUint64(dst, uint64(tick.Of(axis, s.AxisExp)))
 		} else {
@@ -311,7 +311,7 @@ func analysisOf(plotname string) string {
 // unitOf maps the SPICE type column onto a unit. The column itself is kept in
 // the field's metadata, so nothing is lost when the mapping has no answer.
 func unitOf(spiceType string) string {
-	switch t := strings.ToLower(spiceType); {
+	switch t := typeName(spiceType); {
 	case t == "time":
 		return "s"
 	case t == "frequency":

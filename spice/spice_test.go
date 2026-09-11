@@ -147,7 +147,12 @@ func TestConvertTransient(t *testing.T) {
 // TestConvertOperatingPoint is the degenerate case: one point, no independent
 // variable, so nothing may be mistaken for an axis.
 func TestConvertOperatingPoint(t *testing.T) {
-	raw := readRaw(t, "../testdata/test.op.raw")
+	const fixture = "../testdata/test.op.raw"
+	if _, err := os.Stat(fixture); err != nil {
+		// TestConvertNgspiceOperatingPoint covers the same path
+		t.Skip("the LTspice fixture test.op.raw is not in the repository")
+	}
+	raw := readRaw(t, fixture)
 	if raw.Points != 1 || len(raw.Vars) != 30 {
 		t.Fatalf("%d points, %d variables; want 1, 30", raw.Points, len(raw.Vars))
 	}

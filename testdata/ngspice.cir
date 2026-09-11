@@ -1,0 +1,27 @@
+ngspice 47 fixtures for logb/spice
+* Regenerate with: ngspice -b -n ngspice.cir
+V1 in 0 dc 5 ac 1 pulse(0 5 0 1u 1u 0.5m 1m)
+R1 in out 1k
+C1 out 0 100n
+R2 out 0 2k
+D1 out 0 DMOD
+.model DMOD D(IS=1e-14)
+.control
+set filetype=binary
+op
+write ngspice.op.raw
+set filetype=ascii
+write ngspice.op.ascii.raw
+set filetype=binary
+tran 50u 1m
+write ngspice.tran.raw
+set filetype=ascii
+write ngspice.tran.ascii.raw
+set filetype=binary
+dc V1 -2 2 0.5
+write ngspice.dc.raw
+ac dec 2 10 1k
+write ngspice.ac.raw
+quit
+.endc
+.end

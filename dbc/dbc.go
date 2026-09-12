@@ -10,6 +10,11 @@
 // specifies, so that decoding a frame is reading a record: no per-signal shift
 // and mask at display time, and no second implementation of the bit rule to get
 // wrong. See CAN.md.
+//
+// It is the back half as well, for a sender: Message.Encode builds a frame from
+// physical signal values, placing each signal where Schema says a reader will
+// find it, so that a frame this package encodes decodes to the values it was
+// given.
 package dbc
 
 import (
@@ -98,6 +103,13 @@ type Signal struct {
 	// Values is a VAL_ enumeration: raw value to name.
 	Values map[uint64]string
 
+	// Initial is the GenSigStartValue attribute: the raw value the signal
+	// holds when nothing has set it, which is what a sender puts in the bits
+	// of a signal it was not given a value for. HasInitial says whether the
+	// database stated one, for the signal or as the attribute's default.
+	Initial    float64
+	HasInitial bool
+
 	// ExtendedMux records that this signal came with an SG_MUL_VAL_ entry
 	// naming more than one multiplexor value, or a multiplexor that is itself
 	// multiplexed. Logb's guards do not chain and hold one value (SPEC §6.2),
@@ -161,6 +173,11 @@ var (
 	sigCmtRe   = regexp.MustCompile(`^CM_\s+SG_\s+(\d+)\s+([^\s]+)\s+"((?s).*)"\s*;?\s*$`)
 	mulValRe   = regexp.MustCompile(`^SG_MUL_VAL_\s+(\d+)\s+([^\s]+)\s+([^\s]+)\s+(.*?);?\s*$`)
 	mulRangeRe = regexp.MustCompile(`(\d+)-(\d+)`)
+
+	// The one attribute read: a signal's start value, set per signal or as
+	// the attribute's default for every signal that does not set it.
+	startDefRe = regexp.MustCompile(`^BA_DEF_DEF_\s+"GenSigStartValue"\s+([^;\s]+)\s*;?\s*$`)
+	startRe    = regexp.MustCompile(`^BA_\s+"GenSigStartValue"\s+SG_\s+(\d+)\s+(\S+)\s+([^;\s]+)\s*;?\s*$`)
 )
 
 // ParseFile reads a database from a path, keeping its bytes and base name so
@@ -181,10 +198,12 @@ func ParseFile(path string) (*File, error) {
 
 // Parse reads a database.
 //
-// Entries this package does not model — attribute definitions, environment
-// variables, node lists beyond their names — are skipped rather than refused: a
-// real DBC is full of tooling metadata that says nothing about the wire, and an
-// importer that stopped at the first BA_DEF_ would read almost no real file.
+// Entries this package does not model — attributes other than a signal's
+// GenSigStartValue, environment variables, node lists beyond their names — are
+// skipped rather than refused: a real DBC is full of tooling metadata that says
+// nothing about the wire, and an importer that stopped at the first BA_DEF_
+// would read almost no real file. The start value is read because it does say
+// something about the wire: what a sender puts in a signal nobody set.
 func Parse(r io.Reader) (*File, error) {
 	// The bytes are kept, not just the parse: a database is small, and an
 	// importer that embeds it lets a reader check a signal against the
@@ -202,6 +221,10 @@ func Parse(r io.Reader) (*File, error) {
 	var msg *Message   // the message SG_ lines attach to
 	var pending string // a statement being accumulated across lines
 	line := 0
+
+	// The start value's default, applied once every signal has been read.
+	var startDef float64
+	haveStartDef := false
 
 	for sc.Scan() {
 		line++
@@ -270,13 +293,38 @@ func Parse(r io.Reader) (*File, error) {
 		case strings.HasPrefix(trimmed, "SG_MUL_VAL_ "):
 			parseExtendedMux(trimmed, byID)
 
-			// Everything else — BS_, NS_, BA_, BA_DEF_, EV_, blank lines, the
-			// continuation lines of the NS_ block — says nothing about the wire
-			// and is skipped.
+		case strings.HasPrefix(trimmed, "BA_DEF_DEF_ "):
+			if m := startDefRe.FindStringSubmatch(trimmed); m != nil {
+				if v, err := strconv.ParseFloat(m[1], 64); err == nil {
+					startDef, haveStartDef = v, true
+				}
+			}
+
+		case strings.HasPrefix(trimmed, "BA_ "):
+			if m := startRe.FindStringSubmatch(trimmed); m != nil {
+				if s := signalOf(byID, m[1], m[2]); s != nil {
+					if v, err := strconv.ParseFloat(m[3], 64); err == nil {
+						s.Initial, s.HasInitial = v, true
+					}
+				}
+			}
+
+			// Everything else — BS_, NS_, the other attributes, EV_, blank
+			// lines, the continuation lines of the NS_ block — says nothing
+			// about the wire and is skipped.
 		}
 	}
 	if err := sc.Err(); err != nil {
 		return nil, err
+	}
+	if haveStartDef {
+		for _, m := range d.Messages {
+			for _, s := range m.Signals {
+				if !s.HasInitial {
+					s.Initial, s.HasInitial = startDef, true
+				}
+			}
+		}
 	}
 	if len(d.Messages) == 0 {
 		return nil, fmt.Errorf("dbc: no messages found; is this a DBC file?")

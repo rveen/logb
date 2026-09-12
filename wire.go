@@ -191,8 +191,10 @@ func (d *dec) conv() Conversion {
 			c.P[i] = d.f64()
 		}
 		return c
-	case convTable, convTableInterp:
+	case convTable:
 		return d.table(false)
+	case convTableInterp:
+		return d.table(true)
 	case convValueToText:
 		n := int(d.u32())
 		c := ValueToText{}

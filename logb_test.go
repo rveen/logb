@@ -612,6 +612,48 @@ func TestConversions(t *testing.T) {
 	}
 }
 
+// TestTableConversionsRoundTrip reads table conversions back through a file,
+// not only through Apply. An interpolating table once came back from the wire
+// as a stepped one — both types were decoded as a step — and every file using
+// one was read wrong while TestConversions passed. ktest's browser reader,
+// written from the specification, is what noticed.
+func TestTableConversionsRoundTrip(t *testing.T) {
+	for _, interp := range []bool{false, true} {
+		name, want := "step", 0.0
+		if interp {
+			name, want = "interp", 50
+		}
+		s := &Schema{
+			UUID: uid("table/" + name), Name: name, RecordBits: 8,
+			AxisKind: AxisTime, AxisMode: AxisImplicit, AxisExp: -3, AxisUnit: "s", AxisStep: TickVal(1),
+			Fields: []Field{{Name: "x", BitOffset: 0, BitWidth: 8, Type: TypeUint,
+				Conv: Table{Keys: []float64{0, 10, 20}, Vals: []float64{0, 100, 200}, Interp: interp}}},
+		}
+		var out bytes.Buffer
+		w, _ := NewWriter(&out)
+		if err := w.AddStream(s); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.WriteData(s, TickVal(0), 0, 1, []byte{5}); err != nil {
+			t.Fatal(err)
+		}
+		if err := w.Close(); err != nil {
+			t.Fatal(err)
+		}
+		r, err := NewReader(&out)
+		if err != nil {
+			t.Fatal(err)
+		}
+		b, err := r.Next()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got, _ := b.Value(0, 0); got != want {
+			t.Errorf("%s table: 5 read back through a file as %v, want %v", name, got, want)
+		}
+	}
+}
+
 func TestZeroUUIDRejected(t *testing.T) {
 	var out bytes.Buffer
 	w, _ := NewWriter(&out)

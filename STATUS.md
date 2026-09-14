@@ -55,9 +55,14 @@ github.com/rveen/logb/
   internal/example/            the generator: example.go, big.go, sweep.go
   cmd/logbgen/                 writes the example file; -big and -sweep fixtures
   cmd/logbdump/                pretty printer
-  spice/raw.go                 SPICE raw reader (LTspice IV ASCII + XVII UTF-16)
+  spice/raw.go                 SPICE raw reader: LTspice IV (ASCII header), XVII
+                               (UTF-16LE header) and ngspice; binary and ASCII
+                               (Values:) formats; dialect detection
   spice/convert.go             SPICE raw → Logb, the SPEC §11 mapping
   spice/spice_test.go          6 tests, against testdata/test{,.op}.raw
+  spice/ngspice_test.go        8 tests, against testdata/ngspice*.raw
+  testdata/ngspice.cir         the netlist ngspice 47 writes ngspice.*.raw from
+  testdata/ngspice43.cir       the same circuit, for ngspice 43's ngspice43.dc.raw
   cmd/raw2logb/                the importer as a command
   mdf/block.go                 MDF4 block layer: DG/CG/CN/CC/AT, DT/DL/DZ/HL
   mdf/mdf.go                   the model: groups, channels, records, VLSD
@@ -98,6 +103,20 @@ an operating point becomes `axis_kind=index`, and `compressed`/`fastaccess` are
 refused rather than misread. `.step` boundaries are recovered once, at import,
 from the axis restarting, and written as RUN frames — the heuristic below, run
 exactly once and never again by a reader.
+
+The two programs lay out the binary block differently, and only one of them says
+so. LTspice writes f32 values unless `Flags: double` and marks its axis with the
+sign bit; ngspice writes every value as f64 with no flag, and its axis can be
+negative (a DC sweep). ngspice names itself in `Command:` only from version 47
+on — ngspice 43 writes no `Command:` line at all — so the dialect is detected
+from evidence rather than defaulted. A header with LTspice's traces (its name in
+`Command:`, a UTF-16 header, `Offset:` or `Backannotation:`, the flags
+`forward`/`double`/`stepped`) is LTspice; `Command: ngspice…` is ngspice; a
+header that names neither is settled by which layout the block's size fits, and
+is ngspice when both fit (one variable, no points, or an ASCII file), since
+dropping the sign of a DC sweep is the worse mistake. The size check still
+refuses a block that fits neither, so a wrong guess is an error, not a misread.
+`ReadOptions.Dialect` overrides all of it.
 
 The MDF4 importer is the same exercise against the format Logb is a reaction to,
 and it is the strongest evidence the design has. **The record is copied
@@ -483,7 +502,9 @@ freezable, and committed.
    all importer problems rather than format problems: the axis variable is always
    `f64` even when other variables are `f32`; LTspice stores a marker in the time
    axis's sign bit, requiring `abs()`; `Flags: compressed` is LTspice's own scheme
-   and unsupported by that parser.
+   and unsupported by that parser. The importer also reads ngspice (47 and 43
+   are both tested), whose f64 layout has to be told apart from LTspice's
+   without help from older headers — see the dialect detection above.
 4. ~~**Consider an MDF4 importer**~~ — done; see `mdf/` above. The reader is this
    repository's own rather than `/files/go/src/golib/formats/mdf/mdf.go`, which
    was the starting point for the block layer but is built around per-channel

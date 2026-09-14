@@ -38,7 +38,7 @@ type Var struct {
 type Dialect int
 
 const (
-	DialectAuto    Dialect = iota // detect it from the header (ReadOptions only)
+	DialectAuto    Dialect = iota // detect it (ReadOptions only)
 	DialectLTspice                // f32 values unless Flags: double
 	DialectNgspice                // f64 values always
 )
@@ -55,8 +55,10 @@ func (d Dialect) String() string {
 
 // ReadOptions controls ReadRawOptions.
 type ReadOptions struct {
-	// Dialect overrides the detection, which takes a file whose Command: line
-	// starts with "ngspice" for ngspice and any other file for LTspice.
+	// Dialect overrides the detection. A header with LTspice's traces is
+	// LTspice, one whose Command: line starts with "ngspice" is ngspice, and a
+	// binary file whose header names neither is settled by the size of its
+	// block, ngspice when both layouts fit.
 	Dialect Dialect
 }
 
@@ -148,13 +150,16 @@ type Layout struct {
 }
 
 // Layout computes the on-disk size of a point.
-func (r *Raw) Layout() Layout {
+func (r *Raw) Layout() Layout { return r.layout(r.Wide()) }
+
+// layout is the point layout with f64 (wide) or f32 non-axis variables.
+func (r *Raw) layout(wide bool) Layout {
 	comp := 1
 	if r.Complex() {
 		comp = 2
 	}
 	varSize := 4
-	if r.Wide() {
+	if wide {
 		varSize = 8
 	}
 	l := Layout{
@@ -255,10 +260,7 @@ func ReadRawOptions(rd io.Reader, o ReadOptions) (*Raw, error) {
 
 	r.Dialect = o.Dialect
 	if r.Dialect == DialectAuto {
-		r.Dialect = DialectLTspice
-		if strings.HasPrefix(strings.ToLower(r.Command), "ngspice") {
-			r.Dialect = DialectNgspice
-		}
+		r.Dialect = r.headerDialect(lines)
 	}
 
 	if ascii {
@@ -271,6 +273,10 @@ func ReadRawOptions(rd io.Reader, o ReadOptions) (*Raw, error) {
 		return nil, err
 	}
 
+	if r.Dialect == DialectAuto {
+		r.Dialect = r.sizeDialect()
+	}
+
 	want := r.Points * r.Layout().PointBytes
 	switch got := len(r.Values); {
 	case got < want:
@@ -281,6 +287,43 @@ func ReadRawOptions(rd io.Reader, o ReadOptions) (*Raw, error) {
 			ErrLongValues, r.Points, r.Layout().PointBytes, want, got)
 	}
 	return r, nil
+}
+
+// headerDialect is the program the header names, or DialectAuto when it names
+// none. LTspice leaves traces ngspice does not: its name in Command:, the
+// UTF-16 header of XVII, Offset: and Backannotation: lines, and flags ngspice
+// never writes. ngspice names itself only from version 47 on; ngspice 43 writes
+// no Command: line at all.
+func (r *Raw) headerDialect(lines []string) Dialect {
+	cmd := strings.ToLower(r.Command)
+	switch {
+	case strings.Contains(cmd, "ltspice"), r.XVII, len(r.Backanno) > 0,
+		r.Has("forward"), r.Has("double"), r.Has("stepped"):
+		return DialectLTspice
+	case strings.HasPrefix(cmd, "ngspice"):
+		return DialectNgspice
+	}
+	for _, s := range lines {
+		if strings.HasPrefix(s, "Offset:") {
+			return DialectLTspice
+		}
+	}
+	return DialectAuto
+}
+
+// sizeDialect settles a file whose header names no program by the size of its
+// binary block, which differs between f32 and f64 values whenever there is a
+// variable besides the axis. When both layouts fit — one variable, no points,
+// or an ASCII file, whose values are f64 either way — the file is taken for
+// ngspice: the two then differ only in whether the axis keeps its sign, and
+// dropping the sign of a DC sweep is the worse mistake. When neither fits, the
+// size check reports against ngspice's layout.
+func (r *Raw) sizeDialect() Dialect {
+	n := len(r.Values)
+	if !r.ASCII && n == r.Points*r.layout(false).PointBytes && n != r.Points*r.layout(true).PointBytes {
+		return DialectLTspice
+	}
+	return DialectNgspice
 }
 
 // readHeader returns the header lines, consuming the reader up to and including

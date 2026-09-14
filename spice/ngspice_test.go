@@ -2,6 +2,7 @@ package spice
 
 import (
 	"bytes"
+	"encoding/binary"
 	"errors"
 	"io"
 	"math"
@@ -11,7 +12,8 @@ import (
 	"github.com/rveen/logb"
 )
 
-// The ngspice fixtures are written by ngspice 47 from testdata/ngspice.cir.
+// The ngspice fixtures are written by ngspice 47 from testdata/ngspice.cir,
+// except ngspice43.dc.raw, which ngspice 43 writes from testdata/ngspice43.cir.
 
 func near(a, b, rel float64) bool {
 	return a == b || math.Abs(a-b) <= rel*math.Max(math.Abs(a), math.Abs(b))
@@ -124,6 +126,80 @@ func TestNgspiceDC(t *testing.T) {
 	}
 	if a.Float() != -2 {
 		t.Errorf("converted axis starts at %g, want -2", a.Float())
+	}
+}
+
+// TestNgspice43: ngspice 43 writes no Command: line, so its binary DC sweep is
+// recognised by the size of its block. It is the circuit and the sweep of
+// ngspice.dc.raw, and must read the same.
+func TestNgspice43(t *testing.T) {
+	r := readRaw(t, "../testdata/ngspice43.dc.raw")
+	if r.Command != "" || r.Dialect != DialectNgspice {
+		t.Fatalf("Command %q, dialect %v; want none, ngspice", r.Command, r.Dialect)
+	}
+	ref := readRaw(t, "../testdata/ngspice.dc.raw")
+	if r.Points != ref.Points || len(r.Vars) != len(ref.Vars) {
+		t.Fatalf("%d points × %d variables, ngspice 47 has %d × %d", r.Points, len(r.Vars), ref.Points, len(ref.Vars))
+	}
+	l, lr := r.Layout(), ref.Layout()
+	for p := 0; p < r.Points; p++ {
+		for v := range r.Vars {
+			if a, b := r.Value(l, p, v), ref.Value(lr, p, v); !near(a, b, 1e-9) {
+				t.Fatalf("point %d, %s: ngspice 43 %g, ngspice 47 %g", p, r.Vars[v].Name, a, b)
+			}
+		}
+	}
+	if r.Axis(l, 0) != -2 {
+		t.Errorf("axis starts at %g, want -2", r.Axis(l, 0))
+	}
+}
+
+// TestDetect: a header that names its program settles the dialect; one that
+// names none is settled by the size of the block, and is ngspice when both
+// layouts fit.
+func TestDetect(t *testing.T) {
+	f64 := func(x float64) []byte { return binary.LittleEndian.AppendUint64(nil, math.Float64bits(x)) }
+	f32 := func(x float32) []byte { return binary.LittleEndian.AppendUint32(nil, math.Float32bits(x)) }
+	cat := func(b ...[]byte) []byte { return bytes.Join(b, nil) }
+
+	const (
+		head = "Title: x\nPlotname: DC transfer characteristic\nFlags: real\n"
+		two  = "No. Variables: 2\nNo. Points: 1\nVariables:\n\t0\tv(v-sweep)\tvoltage\n\t1\tv(out)\tvoltage\nBinary:\n"
+		one  = "No. Variables: 1\nNo. Points: 1\nVariables:\n\t0\tv(v-sweep)\tvoltage\nBinary:\n"
+	)
+	narrow := cat(f64(-2), f32(1))
+	for _, tc := range []struct {
+		name, hdr string
+		body      []byte
+		want      Dialect
+		axis      float64
+		err       error
+	}{
+		{"f32 without Command", head + two, narrow, DialectLTspice, 2, nil},
+		{"f64 without Command", head + two, cat(f64(-2), f64(1)), DialectNgspice, -2, nil},
+		{"axis only", head + one, f64(-2), DialectNgspice, -2, nil},
+		{"LTspice Command", head + "Command: Linear Technology Corporation LTspice IV\n" + two, narrow, DialectLTspice, 2, nil},
+		{"Offset line", head + "Offset: 0.0\n" + two, narrow, DialectLTspice, 2, nil},
+		{"ngspice Command beats size", head + "Command: ngspice-47\n" + two, narrow, 0, 0, ErrShortValues},
+		{"neither fits", head + two, cat(narrow, f32(0)[:2]), 0, 0, ErrShortValues},
+	} {
+		r, err := ReadRaw(bytes.NewReader(append([]byte(tc.hdr), tc.body...)))
+		if tc.err != nil {
+			if !errors.Is(err, tc.err) {
+				t.Errorf("%s: %v, want %v", tc.name, err, tc.err)
+			}
+			continue
+		}
+		if err != nil {
+			t.Errorf("%s: %v", tc.name, err)
+			continue
+		}
+		if r.Dialect != tc.want {
+			t.Errorf("%s: dialect %v, want %v", tc.name, r.Dialect, tc.want)
+		}
+		if a := r.Axis(r.Layout(), 0); a != tc.axis {
+			t.Errorf("%s: axis %g, want %g", tc.name, a, tc.axis)
+		}
 	}
 }
 

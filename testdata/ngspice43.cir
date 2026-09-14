@@ -1,0 +1,16 @@
+ngspice 43 fixture for logb/spice
+* ngspice 43 writes no Command: line. Regenerate with: ngspice -b -n ngspice43.cir
+* The circuit and the sweep are those of ngspice.cir.
+V1 in 0 dc 5 ac 1 pulse(0 5 0 1u 1u 0.5m 1m)
+R1 in out 1k
+C1 out 0 100n
+R2 out 0 2k
+D1 out 0 DMOD
+.model DMOD D(IS=1e-14)
+.control
+set filetype=binary
+dc V1 -2 2 0.5
+write ngspice43.dc.raw
+quit
+.endc
+.end

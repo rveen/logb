@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"io"
+	"slices"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -152,12 +153,33 @@ func (w *Writer) AddStream(s *Schema) error {
 
 // AddRun declares a run: one dataset within a stream, under different
 // conditions. A logger never calls this.
+//
+// A run stays in the set restated at every segment boundary until EndRun drops
+// it, because a run's data may continue in a later segment and a reader that
+// joined there has to learn its parameters from the preamble.
 func (w *Writer) AddRun(r *Run) error {
 	w.runs = append(w.runs, r)
 	if w.inSeg {
 		return w.writeRun(r)
 	}
 	return nil
+}
+
+// EndRun says no more data will be written for a run, so it need not be
+// restated in the preamble of any later segment.
+//
+// It writes nothing and changes nothing about the run's data, which keeps the
+// RUN frame already written in the segment where it was declared. It exists
+// because restatement is not free: a producer that declares a run per event —
+// a scope acquisition, a sweep step — otherwise pays a preamble that grows
+// without bound, restating every run it ever had into every segment, while a
+// reader only ever needs the ones whose data that segment carries.
+//
+// Call it once the run's last record is written and in the same segment, which
+// is where the reader will find its RUN frame. Ending a run that was never
+// added, or ending one twice, does nothing.
+func (w *Writer) EndRun(id uint32) {
+	w.runs = slices.DeleteFunc(w.runs, func(r *Run) bool { return r.ID == id })
 }
 
 // BeginSegment starts a segment: a sync frame followed by a restatement of every

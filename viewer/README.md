@@ -9,6 +9,36 @@ go run ./cmd/logbview ../testdata/can-example.logb
 
 It indexes the file, starts a local HTTP server, and opens your browser at it.
 
+## Download
+
+Prebuilt binaries are on the [releases page](https://github.com/rveen/logb/releases),
+under tags named `viewer/vX.Y.Z`. Each is a single self-contained file with the
+UI embedded; nothing else needs installing.
+
+| Platform | File |
+|---|---|
+| Linux x86-64 | `logbview-linux-amd64` |
+| Linux ARM64 | `logbview-linux-arm64` |
+| Windows x86-64 | `logbview-windows-amd64.exe` |
+
+On Linux, mark it executable first:
+
+```
+chmod +x logbview-linux-amd64
+./logbview-linux-amd64 file.logb
+```
+
+On Windows, run `logbview-windows-amd64.exe file.logb` from a terminal, or drop
+a file onto the executable. The binary is not code-signed, so SmartScreen may
+warn the first time; "More info → Run anyway" gets past it.
+
+`SHA256SUMS` in each release lets you check a download with
+`sha256sum -c SHA256SUMS --ignore-missing`.
+
+Releases are built by `.github/workflows/release-viewer.yml` when a
+`viewer/v*` tag is pushed. The `viewer/` prefix is Go's convention for a nested
+module, so a viewer release does not give the core library a version.
+
 ## Why this is a separate module
 
 The core library advertises a ~1000-line reader with near-zero dependencies

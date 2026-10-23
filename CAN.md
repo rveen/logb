@@ -261,10 +261,8 @@ when another field of the same record, its `guard_field`, holds the raw value
  `guard_value`. A multiplexed message maps onto that directly, as one stream per
 message:
 
-- the **multiplexor** is an ordinary field, declared before anything that guards
-  on it;
-- each **multiplexed signal** is a field guarded on the multiplexor, with
- `guard_value` set to its `mN` value, overlapping the other variants freely.
+- the **multiplexor** is an ordinary field, declared before anything that guards on it;
+- each **multiplexed signal** is a field guarded on the multiplexor, with `guard_value` set to its `mN` value, overlapping the other variants freely.
 
 For the message above, with the 64-bit timestamp at record bits 0–63:
 
@@ -282,18 +280,9 @@ numbering are independent, and neither needs to know about the other.
 
 Three rules make this safe rather than merely expressible:
 
-- **Absent is not zero.** A reader that meets an unsatisfied guard MUST report the
-  field absent and MUST NOT return a value for it. In a frame with `PID = 12`,
-  `EngineSpeed` has a value and the other variants have *none* — not zero, and
-  not the bits that happen to sit there. A plot shows a gap, a table an empty
-  cell.
-- **The comparison is on raw bits.** The guard compares the multiplexor's raw
-  integer, before any conversion, so it is exact. Comparing physical values would
-  mean float equality against the output of a linear conversion.
-- **It costs nothing per record.** The guard lives in the schema, and the
-  multiplexor is a value the frame already carried. Every guard is checked when
-  the SCHEMA frame is read, so a bad one rejects the schema before any data is
-  decoded.
+- **Absent is not zero.** A reader that meets an unsatisfied guard MUST report the field absent and MUST NOT return a value for it. In a frame with `PID = 12`, `EngineSpeed` has a value and the other variants have *none* — not zero, and not the bits that happen to sit there. A plot shows a gap, a table an empty cell.
+- **The comparison is on raw bits.** The guard compares the multiplexor's raw integer, before any conversion, so it is exact. Comparing physical values would mean float equality against the output of a linear conversion.
+- **It costs nothing per record.** The guard lives in the schema, and the multiplexor is a value the frame already carried. Every guard is checked when the SCHEMA frame is read, so a bad one rejects the schema before any data is decoded.
 
 The raw payload is still stored verbatim beside the decoded stream, so a reader
 that disagrees with the database can always go back to the wire bytes.

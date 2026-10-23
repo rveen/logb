@@ -231,6 +231,101 @@ Two further things fall out, both of which matter more than they look:
   scale, and unit every signal. The example carries its DBC as an attachment —
   as an artefact, never as something a reader must parse.
 
+## Multiplexed messages
+
+Bit numbering says *where* a signal's bits are. A multiplexed message adds a
+second question: *whether they are that signal at all*. In a multiplexed DBC
+message one signal, the **multiplexor** (`M`), selects what the rest of the frame
+carries, and each multiplexed signal (`m4`, `m12`, …) exists only in frames whose
+multiplexor holds its value. The OBD2 response is the textbook case:
+
+```
+BO_ 2024 OBD2_Response: 8 ECU
+ SG_ PID M : 16|8@1+ (1,0) [0|255] ""
+ SG_ EngineLoad m4 : 24|8@1+ (0.39215686,0) [0|100] "%"
+ SG_ CoolantTemp m5 : 24|8@1+ (1,-40) [-40|215] "degC"
+ SG_ EngineSpeed m12 : 31|16@0+ (0.25,0) [0|16383.75] "rpm"
+ SG_ VehicleSpeed m13 : 24|8@1+ (1,0) [0|255] "km/h"
+```
+
+All four signals sit on the same bits. A reader given only their positions
+decodes every one of them from every frame and returns a coolant temperature
+from a frame that carried a vehicle speed — plausible garbage again, one level up
+from the sawtooth.
+
+### What Logb does: guarded fields
+
+Logb has no CAN-specific multiplexing construct. It has **guarded fields**
+([SPEC.md §6.2](SPEC.md)): a field flagged as guarded is present in a record only
+when another field of the same record, its `guard_field`, holds the raw value
+ `guard_value`. A multiplexed message maps onto that directly, as one stream per
+message:
+
+- the **multiplexor** is an ordinary field, declared before anything that guards
+  on it;
+- each **multiplexed signal** is a field guarded on the multiplexor, with
+ `guard_value` set to its `mN` value, overlapping the other variants freely.
+
+For the message above, with the 64-bit timestamp at record bits 0–63:
+
+| Field | `bit_offset` | `bit_width` | Byte order | Guard |
+|---|---|---|---|---|
+| `PID` | 80 | 8 | little | — |
+| `EngineLoad` | 88 | 8 | little | `PID == 4` |
+| `CoolantTemp` | 88 | 8 | little | `PID == 5` |
+| `EngineSpeed` | 88 | 16 | big | `PID == 12` |
+| `VehicleSpeed` | 88 | 8 | little | `PID == 13` |
+
+ `EngineSpeed` is Motorola start bit 31, and the one-line importer above puts it
+at payload bit 24 like any other big-endian signal: multiplexing and bit
+numbering are independent, and neither needs to know about the other.
+
+Three rules make this safe rather than merely expressible:
+
+- **Absent is not zero.** A reader that meets an unsatisfied guard MUST report the
+  field absent and MUST NOT return a value for it. In a frame with `PID = 12`,
+  `EngineSpeed` has a value and the other variants have *none* — not zero, and
+  not the bits that happen to sit there. A plot shows a gap, a table an empty
+  cell.
+- **The comparison is on raw bits.** The guard compares the multiplexor's raw
+  integer, before any conversion, so it is exact. Comparing physical values would
+  mean float equality against the output of a linear conversion.
+- **It costs nothing per record.** The guard lives in the schema, and the
+  multiplexor is a value the frame already carried. Every guard is checked when
+  the SCHEMA frame is read, so a bad one rejects the schema before any data is
+  decoded.
+
+The raw payload is still stored verbatim beside the decoded stream, so a reader
+that disagrees with the database can always go back to the wire bytes.
+
+### What is supported, and what is refused
+
+Guards do not chain: a guard field must not itself be guarded ([SPEC.md §6.2](SPEC.md)).
+That is one level of selection, which covers ordinary DBC multiplexing and
+nothing beyond it.
+
+| DBC construct | Logb |
+|---|---|
+| One multiplexor (`M`) with signals selected by a single value (`mN`) | **Supported** — the multiplexor is a field, each `mN` signal a guarded field |
+| `SG_MUL_VAL_` naming one multiplexor and a single value (`N-N`) | **Supported** — the same as `mN`, written differently |
+| Unmultiplexed signals in a multiplexed message | **Supported** — ordinary fields, present in every frame |
+| `SG_MUL_VAL_` with a value range or several ranges | **Refused** for that signal — a guard holds one value |
+| A multiplexor that is itself multiplexed (`mNM`), or two multiplexors in one message | **Refused** for the whole message — that is two levels of selection |
+| A signal marked `mN` in a message with no multiplexor | **Refused** for that signal — there is nothing to guard on |
+
+Refusing is deliberate. The alternative, decoding such a signal unguarded or
+guarded on the wrong selector, would put values in frames that do not carry
+them. A schema that is wrong about which bits are live is worse than no schema,
+because it still produces numbers. A refused message keeps its raw frames, so
+nothing is lost: it is only not decoded.
+
+Lifting the one-level limit is the first item of the specification's future-work
+section (§13), which proposes letting a guard field itself be guarded, with a
+cycle check at schema validation. The same change would let a single raw CAN
+stream carry every message's signals guarded on the CAN id, with multiplexed
+signals guarded on their multiplexor below it. Until then, nested multiplexing is
+outside the format.
+
 ## Summary
 
 | | DBC / MDF4 | Logb |
@@ -242,10 +337,12 @@ Two further things fall out, both of which matter more than they look:
 | Importing a Motorola signal | a conversion to get wrong | `8*(start/8) + (7 - start%8)` |
 | The normative statement | prose | conformance vectors |
 | Where the layout lives | a sidecar that must survive | in the file, per segment |
+| A multiplexed signal in a frame that does not select it | decoded anyway by tools that ignore the multiplexor | absent, by a guard on the multiplexor's raw value |
+| Nested or ranged multiplexing | `mNM`, `SG_MUL_VAL_` | refused; guards do not chain |
 
 ## See also
 
-- [SPEC.md §6.2](SPEC.md) — Field, bit numbering, and the full vector table
+- [SPEC.md §6.2](SPEC.md) — Field, bit numbering, guarded fields, and the full vector table
 - [SPEC.md §6.3](SPEC.md) — data types, and why `byte_order` is per field
 - [`logb_test.go`](logb_test.go) — `TestDBCMotorola`, `TestConformanceVectors`
 - [`internal/example`](internal/example/example.go) — the mixed frame above

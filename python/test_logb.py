@@ -101,5 +101,53 @@ class TestWriter(unittest.TestCase):
             s.pack({"x": 1})  # y missing and not guarded
 
 
+class TestOverlay(unittest.TestCase):
+    """Signals over a raw CAN payload are read from it, never written into it."""
+
+    def stream(self):
+        return logb.Stream("can", [
+            logb.Field("id", "uint", 32),
+            logb.Field("payload", "bytes", 64),
+            # DBC start bit 31, Motorola, 16 bits: payload bit 24 (CAN.md).
+            logb.Field("Throttle", "uint", 16, offset=32 + 24, big_endian=True),
+            logb.Field("Gear", "uint", 4, offset=32 + 40),
+            logb.Field("Speed", "uint", 8, offset=32 + 48, guard=("id", 0x100)),
+        ])
+
+    PAYLOAD = bytes([0, 0, 0, 0x12, 0x34, 0x05, 0x99, 0])
+
+    def test_derived(self):
+        s = self.stream()
+        rec = s.pack({"id": 0x100, "payload": self.PAYLOAD})[0]
+        self.assertEqual(rec, bytes([0, 1, 0, 0]) + self.PAYLOAD)
+        self.assertEqual(s.pack((0x100, self.PAYLOAD, None, None, None))[0], rec)
+
+    def test_consistent_value(self):
+        s = self.stream()
+        rec = s.pack({"id": 0x100, "payload": self.PAYLOAD})[0]
+        self.assertEqual(s.pack((0x100, self.PAYLOAD, 0x1234, 5, 0x99))[0], rec)
+
+    def test_mismatch(self):
+        s = self.stream()
+        for k, v in [("Throttle", 0x1235), ("Gear", 6), ("Speed", 0x98)]:
+            with self.assertRaises(ValueError, msg=k):
+                s.pack({"id": 0x100, "payload": self.PAYLOAD, k: v})
+
+    def test_partial_overlap_not_derived(self):
+        # Gear's bytes are not all inside the payload, so it is an ordinary
+        # field and needs a value of its own.
+        s = logb.Stream("s", [logb.Field("payload", "bytes", 8),
+                              logb.Field("Gear", "uint", 8, offset=4)])
+        with self.assertRaises(ValueError):
+            s.pack({"payload": b"\x00"})
+
+    def test_absent_payload(self):
+        # With its bytes field absent, an overlaid field writes its own bits.
+        s = logb.Stream("s", [logb.Field("kind", "uint", 8),
+                              logb.Field("payload", "bytes", 8, guard=("kind", 1)),
+                              logb.Field("x", "uint", 8, offset=8)])
+        self.assertEqual(s.pack((0, None, 7))[0], bytes([0, 7]))
+
+
 if __name__ == "__main__":
     unittest.main()

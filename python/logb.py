@@ -261,6 +261,19 @@ class Stream:
             bit = max(bit, f.offset + f.bits)
         self.record_bits = bit
         self.record_bytes = (bit + 7) // 8
+        # A field whose bytes all lie inside a fixed bytes field overlays it:
+        # a CAN signal over its payload. Its bits come from the payload, so
+        # pack derives it rather than writing it a second time.
+        self._within = [None] * len(self.fields)
+        for i, f in enumerate(self.fields):
+            if f.variable or f.type == "bytes":
+                continue
+            lo, hi = f.offset // 8, (f.offset + f.bits - 1) // 8
+            for j, b in enumerate(self.fields):
+                if (b.type == "bytes" and not b.variable
+                        and b.offset // 8 <= lo and hi < (b.offset + b.bits) // 8):
+                    self._within[i] = j
+                    break
         for f in self.fields:
             if f.guard is not None:
                 f.guard = (self.field_index(f.guard[0]), f.guard[1])
@@ -354,7 +367,11 @@ class Stream:
 
     def pack(self, record):
         """Pack one record — a tuple in field order or a dict by name — into
-        its fixed portion and its tail (§6.4)."""
+        its fixed portion and its tail (§6.4).
+
+        A field lying inside a bytes field that has a value is read from those
+        bytes: give it as None, or give the value the bytes already hold. A
+        value that disagrees with them raises an error."""
         if isinstance(record, dict):
             unknown = set(record) - set(self._index)
             if unknown:
@@ -374,7 +391,13 @@ class Stream:
         le = be = 0
         size = self.record_bytes
         tail = []
-        for f, v in zip(self.fields, values):
+        derived = []
+        for i, f in enumerate(self.fields):
+            v = values[i]
+            j = self._within[i]
+            if j is not None and values[j] is not None:
+                derived.append((f, v, self.fields[j]))
+                continue
             if v is None:
                 if f.guard is None and not f.variable:
                     raise ValueError("logb: stream %r: field %r has no value" % (self.name, f.name))
@@ -393,6 +416,18 @@ class Stream:
         fixed = le.to_bytes(size, "little")
         if be:
             fixed = bytes(a | b for a, b in zip(fixed, be.to_bytes(size, "big")))
+        for f, v, b in derived:
+            if v is None:
+                continue
+            want = _raw_bits(f, v)
+            if f.big_endian:
+                got = int.from_bytes(fixed, "big") >> (8 * size - f.offset - f.bits)
+            else:
+                got = int.from_bytes(fixed, "little") >> f.offset
+            got &= (1 << f.bits) - 1
+            if got != want:
+                raise ValueError("logb: stream %r: field %r is 0x%X but %r holds 0x%X there"
+                                 % (self.name, f.name, want, b.name, got))
         return fixed, b"".join(tail)
 
 

@@ -95,9 +95,9 @@ def main(path):
         for i in range(20):
             throttle = 1000 + 50 * i  # 10.00 % .. 19.50 %
             payload = bytes([0, 0, 0, throttle >> 8, throttle & 0xFF, 0, 0, 0])
+            # ThrottlePos is read from the payload, so it is not given here.
             frames.append({"t": 5000 * i, "id": 0x100 if i % 2 == 0 else 0x200,
-                           "dlc": 8, "payload": payload,
-                           "ThrottlePos": throttle if i % 2 == 0 else None})
+                           "dlc": 8, "payload": payload})
         w.write(can, frames, base=now)
 
         w.write(events, [(now, 0, "engine started"), (now + 910_000_000, 1, "MIL on")])

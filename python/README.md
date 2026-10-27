@@ -51,6 +51,11 @@ A few points worth knowing:
 - **Records** are tuples in field order or dicts by name. `None` means absent,
   and is allowed only for a guarded field or a variable one. A value that does
   not fit its field raises an error rather than being truncated.
+- **Signals over a payload are not written.** A field whose bytes all lie inside
+  a fixed `bytes` field, such as a CAN signal over its payload, is read from
+  those bytes: leave it out or pass `None`, and a logger never decodes a
+  frame. A value given anyway must match the bits already there, or `pack`
+  raises an error rather than corrupting the raw bytes.
 - **Offsets** are placed one after another unless you give `offset=`. A field's
   offset counts bits in its own byte order (§6.2), so a big-endian field
   sharing a byte with a little-endian one needs an explicit offset.

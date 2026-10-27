@@ -473,6 +473,7 @@ go run ./cmd/logbdump /tmp/cut.logb       # 302 records, TRUNCATED
 - [GNSS.md](GNSS.md) — storing GNSS: scaled integers, the two clocks, and raw observables
 - [rationale/](rationale/) — why each field is there, what was rejected, what it cost
 - [viewer/](viewer/) — `logbview`, a browser-based viewer for `.logb` files
+- [python/](python/) — a dependency-free Python writer, byte-compatible with the Go one
 - [STATUS.md](STATUS.md) — implementation state and the design decisions
 - [pkg.go.dev](https://pkg.go.dev/github.com/rveen/logb) — API reference
 

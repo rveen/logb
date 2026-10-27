@@ -35,3 +35,6 @@ go.work.sum
 
 # Viewer index caches, written beside the file being viewed
 *.logbview
+
+# Python bytecode
+__pycache__/

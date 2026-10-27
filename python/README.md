@@ -39,6 +39,7 @@ variable-length message, and a stepped AC sweep on a log axis with complex value
 | `add_stream(name, fields, uuid=, axis_kind=, axis_mode=, axis_exp=, axis_step=, axis_scale=, axis_field=, meta=)` | SCHEMA, §5 and §6.1 |
 | `Field(name, type, bits, offset=, big_endian=, variable=, unit=, desc=, conv=, guard=, meta=)` | field, §6.2 |
 | `Linear`, `Rational`, `Table`, `ValueToText`, `RangeToText` | conversions, §7 |
+| `DBC(text)`, `DBC.load(path)`, `.fields(message, offset=, guard=, prefix=)` | fields from a DBC message, as the Go `dbc.Schema` maps them |
 | `write(stream, records, base=, run_id=)` | one DATA frame, §8 |
 | `write_raw(stream, data, count, ...)` | the same, from already-packed bytes |
 | `begin_segment(wall_time_ns)` | SYNC and the schema/run restatement, §4 |
@@ -65,6 +66,16 @@ A few points worth knowing:
   one record per call is valid but pays 40 bytes of framing each.
 - The writer enforces what the Go writer enforces: runs contiguous within a
   segment, and `axis_step` changed only at a new segment.
+- **Signals can come from a DBC.** `logb.DBC(text)` or `DBC.load(path)` reads
+  a database, and `db.fields(message, offset=, guard=, prefix=)` returns that
+  message's signals as fields over a payload starting at bit `offset`: Motorola
+  start bits restated in Logb's numbering, factor and offset as `Linear`, value
+  tables as `ValueToText`, and `mN` signals guarded on their multiplexor. The
+  mapping is the Go `dbc.Schema`'s, field for field. `guard=("id", 0x100)`
+  guards the signals of a message carried in a shared raw stream; a
+  multiplexed message cannot take one, because guards do not chain (§6.2),
+  and a message multiplexed on two levels is refused. Signals it cannot
+  declare are left out and reported to `warn` (default `warnings.warn`).
 - **Not implemented:** HOLD frames (§6.10) and `lz4`. `zstd` works when the
   `zstandard` package is installed; `deflate` works everywhere.
 - Default stream uuids are random. Pass a stable one, e.g. `uuid.uuid5(...)`,

@@ -8,7 +8,8 @@ Four streams, each showing one thing the format is for:
 - EngineData: periodic sampling on an implicit time axis, zero bytes of
   timestamp per record, raw integers with a linear conversion.
 - can0.raw: a CAN trace on an explicit time axis, with the payload kept as
-  bytes and one big-endian (Motorola) signal decoded over the same bits.
+  bytes and a big-endian (Motorola) signal over the same bits, declared from
+  a DBC.
 - events: the event convention of SPEC.md §6.7, a severity enum and a
   variable-length message.
 - ac: an AC sweep on a log-spaced frequency axis with complex values, stepped
@@ -27,9 +28,24 @@ import logb
 NS = uuid.UUID("6f1b1c2e-9a4d-4a7e-8f3e-2d5b6c7a8e90")
 
 
+# The database for can0.raw's message 0x100. It travels in the file as an
+# attachment, so the recording still names its source when this script is gone.
+DBC = """VERSION ""
+
+BU_: ECM
+
+BO_ 256 Throttle: 8 ECM
+ SG_ ThrottlePos : 31|16@0+ (0.01,0) [0|100] "%"  Vector__XXX
+
+CM_ SG_ 256 ThrottlePos "Throttle pedal position";
+"""
+
+
 def main(path):
+    db = logb.DBC(DBC)
     with open(path, "wb") as f, logb.Writer(f, codec="deflate", transpose=True) as w:
         w.write_meta("time.base", "unix")
+        w.write_attach("example.dbc", DBC.encode())
         w.write_meta("vehicle.vin", "WVWZZZ1JZXW000001")
 
         engine = w.add_stream(
@@ -53,11 +69,12 @@ def main(path):
                 logb.Field("t", "uint", 32, unit="us"),
                 logb.Field("id", "uint", 32),
                 logb.Field("dlc", "uint", 8),
-                logb.Field("payload", "bytes", 64, meta={"payload.encoding": "can"}),
-                # Motorola signal: DBC start bit 31, 16 bits, in frames with id 0x100.
-                # bit_offset = 8*(31/8) + (7 - 31%8) = 24, inside the payload at byte 9.
-                logb.Field("ThrottlePos", "uint", 16, offset=72 + 24, big_endian=True,
-                           unit="%", conv=logb.Linear(0, 0.01), guard=("id", 0x100)),
+                logb.Field("payload", "bytes", 64,
+                           meta={"payload.encoding": "can", "payload.schema": "example.dbc"}),
+                # The signals of message 0x100, over the payload at bit 72 and
+                # present only in frames with that id. ThrottlePos is Motorola
+                # start bit 31, which lands at payload bit 24 (CAN.md).
+                *db.fields("Throttle", offset=72, guard=("id", 0x100)),
             ],
         )
 

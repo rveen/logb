@@ -2,7 +2,8 @@
 
 Logb is a self-describing binary format for time-series measurement, bus-trace,
 and simulation recording; see SPEC.md in the repository root. This module writes
-it and does nothing else. It is one file with no dependencies beyond the
+it, and reads just enough of a DBC database to declare CAN signals as fields
+(DBC.fields). It is one file with no dependencies beyond the
 standard library, so it can be copied next to whatever program needs it.
 
 It follows the Go reference writer (writer.go) frame for frame: given the same
@@ -33,13 +34,16 @@ standard library lacks. Codec "deflate" is available everywhere and "zstd" is
 used when the zstandard package is installed.
 """
 
+import re
 import struct
 import uuid as _uuid
+import warnings
 import zlib
 
 __all__ = [
     "Writer", "Stream", "Field", "Run",
     "Linear", "Rational", "Table", "ValueToText", "RangeToText",
+    "DBC",
 ]
 
 VERSION_MAJOR = 0
@@ -686,3 +690,326 @@ class Writer:
         self.closed = True
         if hasattr(self.f, "flush"):
             self.f.flush()
+
+
+# --- DBC ----------------------------------------------------------------------
+#
+# Enough of a Vector DBC reader to declare a message's signals as fields, so
+# they need not be transcribed by hand. It follows the Go package dbc: the same
+# statements are read, every signal keeps the position the database gives it,
+# and what Logb cannot express is refused or reported, never decoded anyway.
+
+_EXTENDED_ID = 0x80000000
+
+_MSG_RE = re.compile(r"^BO_\s+(\d+)\s+([^\s:]+)\s*:\s*(\d+)\s*(\S*)")
+_SIG_RE = re.compile(r"^\s*SG_\s+([^\s:]+)\s*(M|m\d+M?)?\s*:\s*"
+                     r"(\d+)\|(\d+)@([01])([-+])\s*\(([^,]*),([^)]*)\)\s*"
+                     r"\[([^|\]]*)\|([^\]]*)\]\s*\"([^\"]*)\"\s*(.*)$")
+_VAL_RE = re.compile(r"^VAL_\s+(\d+)\s+(\S+)\s+(.*?);?\s*$", re.S)
+_VAL_PAIR_RE = re.compile(r'(-?\d+)\s+"([^"]*)"')
+_VALTYPE_RE = re.compile(r"^SIG_VALTYPE_\s+(\d+)\s+(\S+)\s*:?\s*(\d+)")
+_MSG_CMT_RE = re.compile(r'^CM_\s+BO_\s+(\d+)\s+"(.*)"\s*;?\s*$', re.S)
+_SIG_CMT_RE = re.compile(r'^CM_\s+SG_\s+(\d+)\s+(\S+)\s+"(.*)"\s*;?\s*$', re.S)
+_MUL_VAL_RE = re.compile(r"^SG_MUL_VAL_\s+(\d+)\s+(\S+)\s+(\S+)\s+(.*?);?\s*$")
+_MUL_RANGE_RE = re.compile(r"(\d+)-(\d+)")
+
+
+class DBCSignal:
+    """One SG_ entry. start is the DBC start bit as written; bit_offset is the
+    same position in Logb's numbering (CAN.md)."""
+
+    def __init__(self, name, start, length, big_endian, signed, factor, offset,
+                 min, max, unit):
+        self.name = name
+        self.start = start
+        self.length = length
+        self.big_endian = big_endian
+        self.signed = signed
+        self.float = False
+        self.factor, self.offset = factor, offset
+        self.min, self.max = min, max
+        self.unit = unit
+        self.desc = ""
+        self.values = {}
+        self.multiplexor = False  # DBC's M
+        self.muxed = False        # DBC's mN, present when the multiplexor is N
+        self.mux_value = 0
+        # Set for mNM, or an SG_MUL_VAL_ with a range or several: a second
+        # level of selection, which a guard cannot express (§6.2).
+        self.extended_mux = False
+
+    @property
+    def bit_offset(self):
+        if not self.big_endian:
+            return self.start
+        return 8 * (self.start // 8) + (7 - self.start % 8)
+
+
+class DBCMessage:
+    """One BO_ entry. id is without the extended-frame marker."""
+
+    def __init__(self, id, extended, name, length, sender):
+        self.id = id
+        self.extended = extended
+        self.name = name
+        self.length = length
+        self.sender = sender
+        self.desc = ""
+        self.signals = []
+
+
+def _go_g(v):
+    """v as Go's %g writes it: the shortest digits that read back exactly,
+    in exponent form when the exponent is below -4 or 6 and up. Python's %g
+    rounds to six digits instead, so 16383.75 would come out 16383.8."""
+    if v == 0:
+        return "0"
+    mant, _, e = repr(abs(v)).partition("e")
+    whole, _, frac = mant.partition(".")
+    ds = (whole + frac).lstrip("0")
+    dp = len(whole) + int(e or 0) - (len(whole + frac) - len((whole + frac).lstrip("0")))
+    ds = ds.rstrip("0") or "0"
+    x = dp - 1
+    sign = "-" if v < 0 else ""
+    if x < -4 or x >= 6:
+        m = ds[0] + ("." + ds[1:] if len(ds) > 1 else "")
+        return "%s%se%s%02d" % (sign, m, "-" if x < 0 else "+", abs(x))
+    if dp <= 0:
+        return sign + "0." + "0" * -dp + ds
+    if dp >= len(ds):
+        return sign + ds + "0" * (dp - len(ds))
+    return sign + ds[:dp] + "." + ds[dp:]
+
+
+def _dbc_num(s, default):
+    try:
+        return float(s.strip())
+    except ValueError:
+        return default
+
+
+class DBC:
+    """A parsed DBC database.
+
+        db = logb.DBC.load("vehicle.dbc")
+        s = w.add_stream("VehicleStatus",
+                         fields=[logb.Field("t", "sint", 64)] + db.fields("VehicleStatus", offset=64),
+                         axis_mode="explicit", axis_field="t")
+
+    Statements that say nothing about the wire (attributes, nodes,
+    environment variables) are skipped.
+    """
+
+    def __init__(self, text):
+        if isinstance(text, (bytes, bytearray)):
+            text = text.decode("utf-8", "replace")
+        self.version = ""
+        self.messages = []
+        self._by_id = {}
+        msg = None
+        pending = ""
+        for n, line in enumerate(text.splitlines(), 1):
+            line = line.rstrip("\r")
+            # A comment or value table may run over several lines: anything
+            # that opens a quote without closing it continues until it does.
+            if pending:
+                pending += "\n" + line
+                if pending.count('"') % 2:
+                    continue
+                line, pending = pending, ""
+            elif (line.strip().startswith(("CM_ ", "VAL_ ", "BA_ ", "BA_DEF_ ", "BA_DEF_DEF_ "))
+                  and line.count('"') % 2):
+                pending = line
+                continue
+
+            t = line.strip()
+            if t.startswith("VERSION"):
+                self.version = t[len("VERSION"):].strip().strip('"')
+            elif t.startswith("BO_ "):
+                m = _MSG_RE.match(t)
+                if not m:
+                    raise ValueError("logb: dbc line %d: malformed BO_: %r" % (n, t))
+                id = int(m.group(1))
+                msg = DBCMessage(id & ~_EXTENDED_ID, bool(id & _EXTENDED_ID), m.group(2),
+                                 int(m.group(3)), m.group(4))
+                self.messages.append(msg)
+                self._by_id[msg.id] = msg
+            elif t.startswith("SG_ "):
+                if msg is None:
+                    raise ValueError("logb: dbc line %d: signal outside a message" % n)
+                msg.signals.append(self._signal(line, n))
+            elif t.startswith("VAL_ "):
+                m = _VAL_RE.match(t)
+                sg = m and self._signal_of(m.group(1), m.group(2))
+                if sg:
+                    sg.values = {int(v): txt for v, txt in _VAL_PAIR_RE.findall(m.group(3))}
+            elif t.startswith("SIG_VALTYPE_ "):
+                m = _VALTYPE_RE.match(t)
+                sg = m and self._signal_of(m.group(1), m.group(2))
+                if sg and m.group(3) in ("1", "2"):
+                    sg.float, sg.length = True, 32 if m.group(3) == "1" else 64
+            elif t.startswith("CM_ "):
+                m = _SIG_CMT_RE.match(t)
+                if m:
+                    sg = self._signal_of(m.group(1), m.group(2))
+                    if sg:
+                        sg.desc = m.group(3)
+                else:
+                    m = _MSG_CMT_RE.match(t)
+                    if m and int(m.group(1)) & ~_EXTENDED_ID in self._by_id:
+                        self._by_id[int(m.group(1)) & ~_EXTENDED_ID].desc = m.group(2)
+            elif t.startswith("SG_MUL_VAL_ "):
+                m = _MUL_VAL_RE.match(t)
+                sg = m and self._signal_of(m.group(1), m.group(2))
+                if sg:
+                    ranges = _MUL_RANGE_RE.findall(m.group(4))
+                    if len(ranges) == 1 and ranges[0][0] == ranges[0][1]:
+                        sg.muxed, sg.mux_value = True, int(ranges[0][0])
+                    else:
+                        sg.extended_mux = True
+        if not self.messages:
+            raise ValueError("logb: dbc: no messages found; is this a DBC file?")
+
+    @classmethod
+    def load(cls, path):
+        with open(path, "rb") as f:
+            return cls(f.read())
+
+    @staticmethod
+    def _signal(line, n):
+        m = _SIG_RE.match(line)
+        if not m:
+            raise ValueError("logb: dbc line %d: malformed SG_: %r" % (n, line.strip()))
+        g = m.groups()
+        sg = DBCSignal(g[0], int(g[2]), int(g[3]), g[4] == "0", g[5] == "-",
+                       _dbc_num(g[6], 1), _dbc_num(g[7], 0),
+                       _dbc_num(g[8], 0), _dbc_num(g[9], 0), g[10])
+        mux = g[1] or ""
+        if mux == "M":
+            sg.multiplexor = True
+        elif mux.startswith("m"):
+            sg.muxed, sg.mux_value = True, int(mux[1:].rstrip("M"))
+            if mux.endswith("M"):
+                # Multiplexed and a multiplexor: the second level.
+                sg.multiplexor = sg.extended_mux = True
+        return sg
+
+    def _signal_of(self, id, name):
+        msg = self._by_id.get(int(id) & ~_EXTENDED_ID)
+        if msg:
+            for sg in msg.signals:
+                if sg.name == name:
+                    return sg
+        return None
+
+    def message(self, key):
+        """The message with this name, or this id (without the extended
+        marker)."""
+        for m in self.messages:
+            if (m.id if isinstance(key, int) else m.name) == key:
+                return m
+        raise KeyError("logb: dbc has no message %r" % (key,))
+
+    def fields(self, message, offset=0, guard=None, prefix="", warn=None):
+        """The message's signals as fields, for a record whose payload starts
+        at bit offset (a whole byte).
+
+        The multiplexor comes first, and each mN signal is guarded on it. guard
+        =(field, value) guards the other signals, for a stream that carries
+        several messages, such as a raw trace with signals over its payload
+        guarded on the CAN id. Guards do not chain (§6.2), so a multiplexed
+        message cannot take one: give it a stream of its own. prefix is put in
+        front of every name, which keeps signals of different messages apart
+        in one stream.
+
+        A message multiplexed on two levels raises an error. A signal that
+        cannot be declared (an extended-multiplexed one, an mN signal without a
+        multiplexor, one outside the frame) is left out and reported to warn,
+        which defaults to warnings.warn.
+
+        Signals over a payload field are read from it (Stream.pack), so the
+        fields need no values when records are written.
+        """
+        m = message if isinstance(message, DBCMessage) else self.message(message)
+        if warn is None:
+            warn = lambda s: warnings.warn(s, stacklevel=3)
+        if offset % 8:
+            raise ValueError("logb: dbc: payload offset %d is not a whole byte" % offset)
+        if not 0 < m.length <= 64:
+            raise ValueError("logb: dbc: message %r has a length of %d bytes" % (m.name, m.length))
+
+        mux = None
+        for sg in m.signals:
+            if not sg.multiplexor:
+                continue
+            if mux is not None or sg.extended_mux:
+                raise ValueError("logb: dbc: message %r multiplexes on more than one level "
+                                 "(%r, then %r); guards do not chain (§6.2)"
+                                 % (m.name, (mux or sg).name, sg.name))
+            mux = sg
+        if mux is not None and guard is not None:
+            raise ValueError("logb: dbc: message %r is multiplexed on %r, so its signals guard on "
+                             "that and cannot also guard on %r; guards do not chain (§6.2)"
+                             % (m.name, mux.name, guard[0]))
+
+        out = []
+        if mux is not None:
+            f = self._field(m, mux, offset, prefix)
+            if f is None:
+                raise ValueError("logb: dbc: message %r: multiplexor %r does not fit the frame"
+                                 % (m.name, mux.name))
+            if not f.desc:
+                f.desc = "multiplexor: selects which signals this frame carries"
+            out.append(f)
+        for sg in m.signals:
+            if sg is mux:
+                continue
+            if sg.extended_mux:
+                warn("logb: dbc: message %s: signal %r uses extended multiplexing, which Logb "
+                     "cannot express; it is left out" % (m.name, sg.name))
+                continue
+            if sg.muxed and mux is None:
+                warn("logb: dbc: message %s: signal %r is multiplexed but the message has no "
+                     "multiplexor; it is left out" % (m.name, sg.name))
+                continue
+            f = self._field(m, sg, offset, prefix)
+            if f is None:
+                warn("logb: dbc: message %s: signal %r, %d bits from bit %d, does not fit a "
+                     "%d-byte frame; it is left out" % (m.name, sg.name, sg.length,
+                                                        sg.bit_offset, m.length))
+                continue
+            if sg.muxed:
+                f.guard = (prefix + mux.name, sg.mux_value)
+            else:
+                f.guard = guard
+            out.append(f)
+        return out
+
+    @staticmethod
+    def _field(m, sg, offset, prefix):
+        """One signal as a field, as the Go dbc.Schema maps it; None if it
+        does not fit the frame."""
+        if not 0 < sg.length <= 64 or sg.bit_offset + sg.length > 8 * m.length:
+            return None
+        if sg.float:
+            typ = "float"
+        elif sg.signed:
+            typ = "sint"
+        elif sg.length == 1:
+            typ = "bool"  # a one-bit unsigned signal is a flag
+        else:
+            typ = "uint"
+        conv = None
+        if sg.values:
+            # An enumeration: the names win over any scaling.
+            conv = ValueToText(sorted(sg.values.items()))
+        elif sg.factor != 1 or sg.offset != 0:
+            conv = Linear(sg.offset, sg.factor)
+        meta = {}
+        if sg.values:
+            meta["dbc.values"] = str(len(sg.values))
+        if sg.min != 0 or sg.max != 0:
+            meta["dbc.min"], meta["dbc.max"] = _go_g(sg.min), _go_g(sg.max)
+        return Field(prefix + sg.name, typ, sg.length, offset=offset + sg.bit_offset,
+                     big_endian=sg.big_endian, unit=sg.unit, desc=sg.desc, conv=conv,
+                     meta=meta)

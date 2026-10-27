@@ -315,6 +315,82 @@ stream carry every message's signals guarded on the CAN id, with multiplexed
 signals guarded on their multiplexor below it. Until then, nested multiplexing is
 outside the format.
 
+### Multiplexing on more than one level
+
+The OBD2 message above is simplified: it fixes the service to mode 01 and
+multiplexes on the PID alone. Real diagnostic traffic does not. A diagnostic
+response selects **twice** — first on the service, then on an identifier that
+means something different under each service — and that is the case Logb does
+not yet support.
+
+The layout of a single-frame response (ISO 15765-2, ISO-TP) is:
+
+| Byte | 0 | 1 | 2 | 3 … |
+|---|---|---|---|---|
+| OBD2 mode 01 | length | `0x41` | PID | data |
+| OBD2 mode 02 | length | `0x42` | PID | frame number, then data |
+| UDS `ReadDataByIdentifier` | length | `0x62` | DID (2 bytes, big-endian) | data |
+| UDS negative response | length | `0x7F` | rejected service | response code |
+
+The service byte is the outer multiplexor: a positive response echoes the request
+service plus `0x40`. What follows depends on it. In OBD2 the byte after it is a
+PID under both mode 01 and mode 02, but the data starts one byte later in mode 02,
+so PID `0x0C` is engine speed at bytes 3–4 in one frame and at bytes 4–5 in the
+next. In UDS the identifier is a 16-bit DID, and under `0x7F` there is no
+identifier at all. The inner selector's position, width and meaning are all
+chosen by the outer one.
+
+DBC expresses this with **extended multiplexing**: a signal marked `mNM` is a
+multiplexor that is itself multiplexed, and `SG_MUL_VAL_` says which multiplexor
+each signal hangs off:
+
+```
+BO_ 2024 OBD2_Response: 8 ECU
+ SG_ Service M : 8|8@1+ (1,0) [0|255] ""
+ SG_ PID_Mode01 m65M : 16|8@1+ (1,0) [0|255] ""
+ SG_ PID_Mode02 m66M : 16|8@1+ (1,0) [0|255] ""
+ SG_ FrameNo m66 : 24|8@1+ (1,0) [0|255] ""
+ SG_ EngineSpeed m12 : 31|16@0+ (0.25,0) [0|16383.75] "rpm"
+ SG_ FreezeEngineSpeed m12 : 39|16@0+ (0.25,0) [0|16383.75] "rpm"
+
+SG_MUL_VAL_ 2024 PID_Mode01 Service 65-65;
+SG_MUL_VAL_ 2024 PID_Mode02 Service 66-66;
+SG_MUL_VAL_ 2024 FrameNo Service 66-66;
+SG_MUL_VAL_ 2024 EngineSpeed PID_Mode01 12-12;
+SG_MUL_VAL_ 2024 FreezeEngineSpeed PID_Mode02 12-12;
+```
+
+`EngineSpeed` and `FreezeEngineSpeed` are both `m12`. What tells them apart is
+not their own selector value but their selector's selector: `EngineSpeed` is live
+only when `Service == 0x41` **and** `PID_Mode01 == 12`. That is two conditions,
+and a Logb guard is one. Guarding `EngineSpeed` on the PID byte alone would decode
+it from every mode 02 frame with PID `0x0C` too, where those bits are the frame
+number and the high byte of the freeze-frame value: plausible garbage once more.
+
+Diagnostics are the common case, not the only one. The same shape appears
+wherever one message id is shared by an indexed family of payloads, for example a
+battery management system reporting cell voltages selected by module and then by
+cell group, or a sensor that pages its configuration by page and sub-page.
+
+**Logb does not support this yet.** A message containing an `mNM` multiplexor, or
+more than one multiplexor, is refused as a whole by the DBC importer, as in the
+table above. Its raw frames are still stored, so nothing is lost; its signals are
+just not decoded. Two ways forward are recorded:
+
+- **Chained guards** ([SPEC.md §13](SPEC.md)) — let a guard field itself be
+  guarded, so `EngineSpeed` guards on `PID_Mode01`, which guards on `Service`.
+  This is the general answer, and a format change.
+- **Flattening adjacent selectors** ([TODO.md](TODO.md)) — when the selectors sit
+  in one unbroken run of bits, as service and PID do in bytes 1–2, a single
+  synthetic field spanning both reads them as one integer (`0x410C`), and one
+  ordinary guard on it is enough. No format change, but it covers only the
+  contiguous case.
+
+Separately from multiplexing, most UDS responses are longer than one CAN frame
+and arrive split across ISO-TP first and consecutive frames. Reassembling those
+is transport-layer work that no frame-level database, DBC or Logb, describes;
+only single-frame responses can be decoded signal by signal.
+
 ## Summary
 
 | | DBC / MDF4 | Logb |

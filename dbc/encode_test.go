@@ -288,6 +288,19 @@ func TestEncodeRefuses(t *testing.T) {
  SG_ PID m1M : 8|8@1+ (1,0) [0|255] ""  Tester
  SG_ Value m3 : 16|16@1+ (1,0) [0|0] ""  Tester
 `).Messages[0]
+	overlap := parse(t, `BO_ 100 Overlap: 8 ECU
+ SG_ Low : 0|8@1+ (1,0) [0|0] ""  Tester
+ SG_ Word : 7|16@0+ (1,0) [0|0] ""  Tester
+`).Messages[0]
+	crossed := parse(t, `BO_ 100 Crossed: 8 ECU
+ SG_ Intel : 4|8@1+ (1,0) [0|0] ""  Tester
+ SG_ Motorola : 11|4@0+ (1,0) [0|0] ""  Tester
+`).Messages[0]
+	muxed := parse(t, `BO_ 100 Muxed: 8 ECU
+ SG_ Mode M : 0|8@1+ (1,0) [0|0] ""  Tester
+ SG_ Plain : 16|8@1+ (1,0) [0|0] ""  Tester
+ SG_ Variant m2 : 16|8@1+ (1,0) [0|0] ""  Tester
+`).Messages[0]
 	wide := parse(t, `BO_ 100 Wide: 8 ECU
  SG_ Raw : 0|8@1+ (1,0) [0|0] ""  Tester
 `).Messages[0]
@@ -309,6 +322,11 @@ func TestEncodeRefuses(t *testing.T) {
 		{"not a number", engine, full("EngineSpeed", math.NaN()), "not a value"},
 		{"an unset signal", engine, map[string]any{"EngineSpeed": 1000.0}, "no value for"},
 		{"two levels of multiplexing", nested, map[string]any{"Service": 1.0}, "more than one level"},
+		{"overlapping signals", overlap, map[string]any{"Low": 1.0, "Word": 2.0}, "overlap"},
+		// Intel 4|8 ends in bits 0..3 of byte 1, which Motorola 11|4 is too:
+		// only physical bit positions show it, the BitOffsets (4 and 12) don't.
+		{"Intel and Motorola sharing bits", crossed, map[string]any{"Intel": 1.0, "Motorola": 2.0}, "overlap"},
+		{"a variant over an ordinary signal", muxed, map[string]any{"Mode": 2.0, "Plain": 1.0, "Variant": 3.0}, "overlap"},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			_, err := c.m.Encode(c.in)
@@ -316,6 +334,23 @@ func TestEncodeRefuses(t *testing.T) {
 				t.Errorf("got %v, want a refusal mentioning %q", err, c.want)
 			}
 		})
+	}
+}
+
+// TestEncodeAdjacent checks that signals sharing a byte but not a bit are not
+// taken for overlapping: Intel 4|8 ends in the low half of byte 1, Motorola
+// 15|4 fills the high half.
+func TestEncodeAdjacent(t *testing.T) {
+	m := parse(t, `BO_ 100 Adjacent: 8 ECU
+ SG_ Intel : 4|8@1+ (1,0) [0|0] ""  Tester
+ SG_ Motorola : 15|4@0+ (1,0) [0|0] ""  Tester
+`).Messages[0]
+	got, err := m.Encode(map[string]any{"Intel": 0xAB, "Motorola": 0xC})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []byte{0xB0, 0xCA, 0, 0, 0, 0, 0, 0}; !bytes.Equal(got, want) {
+		t.Errorf("got % X, want % X", got, want)
 	}
 }
 

@@ -36,7 +36,9 @@ func (f *File) Message(name string) *Message {
 // What would otherwise be adjusted is refused instead: a value outside the
 // range the database declares for the signal, or one its bits cannot hold; a
 // name its value table does not have; a signal the message does not have, or
-// one this frame does not carry under the multiplexor value chosen; and a
+// one this frame does not carry under the multiplexor value chosen; two
+// signals in the frame that share a bit, where one would overwrite the
+// other; and a
 // message multiplexed on more than one level, which Schema refuses too, so that
 // no frame is sent that no recording of it could decode.
 func (m *Message) Encode(values map[string]any) ([]byte, error) {
@@ -73,6 +75,7 @@ func (m *Message) Encode(values map[string]any) ([]byte, error) {
 	}
 
 	data := make([]byte, m.Length)
+	owner := make([]*Signal, 8*m.Length)
 	var missing []string
 	for _, s := range m.Signals {
 		if s.Muxed && (mux == nil || s.MuxValue != muxRaw) {
@@ -96,6 +99,10 @@ func (m *Message) Encode(values map[string]any) ([]byte, error) {
 		}
 		if err := put(data, s, r); err != nil {
 			return nil, fmt.Errorf("dbc: message %q: %w", m.Name, err)
+		}
+		if o := claim(owner, s); o != nil {
+			return nil, fmt.Errorf("dbc: message %q: signals %q and %q overlap in this frame, "+
+				"so one would overwrite the other", m.Name, o.Name, s.Name)
 		}
 	}
 	if len(missing) > 0 {
@@ -230,6 +237,26 @@ func mask(n int) uint64 {
 		return ^uint64(0)
 	}
 	return uint64(1)<<n - 1
+}
+
+// claim marks the frame bits s occupies as its own, and returns the signal
+// that already held one of them, or nil. Bits are indexed physically, as bit
+// i%8 of byte i/8 counting from the least significant, so that an Intel and a
+// Motorola signal over the same wire bits collide although their BitOffsets
+// count in different numberings. s must fit the frame, as put has checked.
+func claim(owner []*Signal, s *Signal) *Signal {
+	off, n := s.BitOffset(), uint32(s.Length)
+	for p := off; p < off+n; p++ {
+		i := p
+		if s.BigEndian {
+			i = 8*(p/8) + 7 - p%8
+		}
+		if owner[i] != nil {
+			return owner[i]
+		}
+		owner[i] = s
+	}
+	return nil
 }
 
 // put writes raw into a signal's bits: from its BitOffset, in its byte order.

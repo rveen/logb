@@ -8,8 +8,8 @@ Four streams, each showing one thing the format is for:
 - EngineData: periodic sampling on an implicit time axis, zero bytes of
   timestamp per record, raw integers with a linear conversion.
 - can0.raw: a CAN trace on an explicit time axis, with the payload kept as
-  bytes and a big-endian (Motorola) signal over the same bits, declared from
-  a DBC.
+  bytes and signals over the same bits: those of message 0x100 declared from
+  a DBC, those of 0x200 by hand, so both ways can be compared.
 - events: the event convention of SPEC.md §6.7, a severity enum and a
   variable-length message.
 - ac: an AC sweep on a log-spaced frequency axis with complex values, stepped
@@ -75,6 +75,21 @@ def main(path):
                 # present only in frames with that id. ThrottlePos is Motorola
                 # start bit 31, which lands at payload bit 24 (CAN.md).
                 *db.fields("Throttle", offset=72, guard=("id", 0x100)),
+                # The signals of message 0x200, declared by hand: what
+                # db.fields does, done once per signal. Each DBC line is
+                # given above its field. The offset is the payload's bit 72
+                # plus the signal's position in Logb's numbering: for Intel
+                # (@1) that is the start bit itself, for Motorola (@0) it is
+                # 8*(start//8) + 7 - start%8, never the start bit (CAN.md).
+                #   SG_ WheelSpeed : 0|16@1+ (0.01,0) [0|655.35] "km/h"
+                logb.Field("WheelSpeed", "uint", 16, offset=72 + 0,
+                           unit="km/h", conv=logb.Linear(0, 0.01), guard=("id", 0x200)),
+                #   SG_ BrakePressure : 39|12@0+ (0.1,0) [0|409.5] "bar"
+                #   Motorola start 39 is 8*4 + 7 - 7 = Logb bit 32.
+                logb.Field("BrakePressure", "uint", 12, offset=72 + 32, big_endian=True,
+                           unit="bar", conv=logb.Linear(0, 0.1), guard=("id", 0x200)),
+                #   SG_ BrakeOn : 48|1@1+ (1,0) [0|1] ""
+                logb.Field("BrakeOn", "bool", offset=72 + 48, guard=("id", 0x200)),
             ],
         )
 
@@ -108,13 +123,19 @@ def main(path):
         # 100 samples, one DATA frame. A real logger batches a few thousand.
         w.write(engine, [(3200 + 4 * i, 80 + i // 10, i > 90) for i in range(100)], base=now)
 
+        # Frames alternate between the two messages. Only the wire bytes are
+        # given: every signal is read from the payload, however it was declared.
         frames = []
         for i in range(20):
-            throttle = 1000 + 50 * i  # 10.00 % .. 19.50 %
-            payload = bytes([0, 0, 0, throttle >> 8, throttle & 0xFF, 0, 0, 0])
-            # ThrottlePos is read from the payload, so it is not given here.
-            frames.append({"t": 5000 * i, "id": 0x100 if i % 2 == 0 else 0x200,
-                           "dlc": 8, "payload": payload})
+            if i % 2 == 0:
+                throttle = 1000 + 50 * i  # 10.00 % .. 19.00 %
+                id, payload = 0x100, bytes([0, 0, 0, throttle >> 8, throttle & 0xFF, 0, 0, 0])
+            else:
+                speed = 5000 + 10 * i  # 50.10 km/h ..
+                bar = 20 * i           # 2.0 bar .. in 0.1 bar, Motorola across bytes 4 and 5
+                id, payload = 0x200, bytes([speed & 0xFF, speed >> 8, 0, 0,
+                                            bar >> 4, (bar & 0xF) << 4, i > 10, 0])
+            frames.append({"t": 5000 * i, "id": id, "dlc": 8, "payload": payload})
         w.write(can, frames, base=now)
 
         w.write(events, [(now, 0, "engine started"), (now + 910_000_000, 1, "MIL on")])
